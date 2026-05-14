@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx vite *)",
+      "Bash(netstat -ano)",
+      "Bash(ls -la /c/Users/Administrator/Downloads/*.html 2>/dev/null | head -5)",
+      "Read(//c/Users/Administrator/Downloads/**)",
+      "Bash(mkdir -p e:/project/public && cp \"/c/Users/Administrator/Downloads/登录测试.html\" e:/project/public/)",
+      "Bash(chmod +w e:/project/public/登录测试.html)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Administrator\\Downloads"
+    ]
+  }
+}

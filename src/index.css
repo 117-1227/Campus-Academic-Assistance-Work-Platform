@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* === 8pt Grid Foundation === */
+
+html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 16px;            /* base = 16px, 1rem = 16px */
+  line-height: 1.6;
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  line-height: 1.4;
+}
+
+/* ---- Design Tokens (8pt grid) ---- */
+
+/* Stat card primary number — 32px / leading 1.4 / weight 600 */
+.stat-number {
+  font-size: 2rem;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Stat card label — 12px */
+.stat-label {
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+/* Page title — 20px */
+.page-title {
+  font-size: 1.25rem;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+/* ---- 8pt Constrained Components ---- */
+
+/* Input: h-10 (40px) base style */
+.input-8pt {
+  height: 2.5rem;             /* 40px */
+  padding-left: 0.75rem;      /* 12px */
+  padding-right: 0.75rem;
+  font-size: 0.875rem;        /* 14px */
+}
+
+/* Button: h-10 (40px) base style */
+.btn-8pt {
+  height: 2.5rem;             /* 40px */
+  padding-left: 1rem;         /* 16px */
+  padding-right: 1rem;
+  font-size: 0.875rem;        /* 14px */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;                /* 8px */
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms, border-color 150ms;
+}
+
+/* Card: p-6 (24px) */
+.card-8pt {
+  padding: 1.5rem;            /* 24px */
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+}
+
+/* Card grid gap */
+.card-grid-8pt {
+  gap: 1rem;                  /* 16px */
+}
+
+/* Toolbar row gap */
+.toolbar-8pt {
+  gap: 0.75rem;               /* 12px */
+}
+
+/* Section vertical gap */
+.section-8pt {
+  gap: 1.5rem;                /* 24px */
+}
+
+/* Modal body */
+.modal-body-8pt {
+  padding: 1.5rem;            /* 24px */
+}
