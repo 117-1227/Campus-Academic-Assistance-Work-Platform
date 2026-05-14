@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>学助管理 — 接口调试工具</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{--bg:#f7f9fc;--card:#fff;--muted:#6b7280;--accent:#2563eb;--success:#10b981;--danger:#ef4444}
+  body{font-family:Inter,Segoe UI,Arial;margin:18px;background:var(--bg);color:#111}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .card{background:var(--card);padding:12px;border-radius:8px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  input[type=text],select{padding:8px;border:1px solid #e5e7eb;border-radius:6px}
+  button{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer}
+  button.secondary{background:#eef2ff;color:#0f172a}
+  #assistantTable{width:100%;border-collapse:collapse;margin-top:12px}
+  #assistantTable th,#assistantTable td{padding:10px;border-bottom:1px solid #edf2f7;text-align:left}
+  #assistantTable th{background:#fbfdff;color:#374151}
+  .small{font-size:13px;color:var(--muted)}
+  .controls{display:flex;gap:8px;align-items:center}
+  .stats{display:flex;gap:8px;flex-wrap:wrap}
+  .badge{padding:4px 8px;border-radius:999px;background:#f1f5f9;color:#0b1220;font-size:13px}
+  .toast{position:fixed;right:18px;bottom:18px;background:#111;color:#fff;padding:10px 14px;border-radius:8px;opacity:.95}
+  #debug{white-space:pre-wrap;background:#0f172a;color:#d1d5db;padding:10px;border-radius:6px;max-height:220px;overflow:auto}
+  .page-controls{display:flex;gap:6px;align-items:center}
+  .editable{background:#fff;border:1px dashed transparent;padding:4px;border-radius:4px}
+  .editable[contenteditable="true"]{border-color:#e2e8f0}
+  .cols{display:flex;gap:8px}
+  input[type=file]{display:none}
+  .checkbox{width:16px;height:16px}
+</style>
+</head>
+<body>
+<h2>学助管理 — 接口调试工具</h2>
+<div class="toolbar card">
+  <div class="cols">
+    <input id="baseUrlInput" type="text" placeholder="后端地址，例如 http://127.0.0.1:3000" style="width:360px">
+    <button id="saveBaseBtn" class="secondary">保存地址</button>
+    <input id="tokenInput" type="text" placeholder="Bearer Token（会保存到 localStorage）" style="width:260px">
+    <button id="saveTokenBtn" class="secondary">保存 Token</button>
+  </div>
+  <div style="flex:1"></div>
+  <div class="stats">
+    <span class="badge">总数: <strong id="totalCount">0</strong></span>
+    <span class="badge">在职: <strong id="activeCount">0</strong></span>
+    <span class="badge">在岗: <strong id="onDutyCount">0</strong></span>
+  </div>
+</div>
+
+<div class="card" style="padding:12px;margin-top:10px">
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <input id="searchInput" type="text" placeholder="搜索学号或姓名" style="width:260px">
+    <select id="statusFilter"><option value="">全部状态</option><option value="active">在职</option><option value="inactive">离职</option></select>
+    <select id="positionFilter"><option value="">全部岗位</option></select>
+    <button id="fetchBtn">获取学助列表</button>
+    <button id="refreshBtn" class="secondary">刷新</button>
+
+    <div style="flex:1"></div>
+    <div class="page-controls">
+      <button id="prevPage" class="secondary">上一页</button>
+      <div class="small">第 <span id="pageNo">1</span> 页</div>
+      <button id="nextPage" class="secondary">下一页</button>
+      <select id="limitSelect"><option>10</option><option>20</option><option>50</option></select>
+    </div>
+  </div>
+
+  <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+    <button id="bulkOnDuty">批量设为上班</button>
+    <button id="bulkOffDuty" class="secondary">批量设为下班</button>
+    <button id="exportCsv" class="secondary">导出当前视图 CSV</button>
+    <label class="secondary" style="padding:8px 12px;border-radius:6px;cursor:pointer">导入 CSV<input id="csvFile" type="file" accept=".csv"></label>
+    <button id="toggleDebug" class="secondary">切换调试面板</button>
+  </div>
+
+  <table id="assistantTable">
+    <thead>
+      <tr>
+        <th><input id="selectAll" type="checkbox" class="checkbox"></th>
+        <th>学号</th>
+        <th>姓名</th>
+        <th>岗位</th>
+        <th>状态</th>
+        <th>手机</th>
+        <th>上/下班</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<div id="debug" class="card" style="margin-top:12px;display:none"></div>
+<div id="toast" style="display:none" class="toast"></div>
+
+<script>
+let BASE_URL = localStorage.getItem('debug_base_url') || (location.hostname === 'localhost' ? 'http://localhost:3000' : location.origin);
+let token = '';
+let page = 1; let limit = 20; let total = 0; let positions = new Set();
+const baseUrlInput = document.getElementById('baseUrlInput');
+const saveBaseBtn = document.getElementById('saveBaseBtn');
+const tokenInput = document.getElementById('tokenInput');
+const fetchBtn = document.getElementById('fetchBtn');
+const refreshBtn = document.getElementById('refreshBtn');
+const searchInput = document.getElementById('searchInput');
+const statusFilter = document.getElementById('statusFilter');
+const positionFilter = document.getElementById('positionFilter');
+const tableBody = document.querySelector('#assistantTable tbody');
+const debugEl = document.getElementById('debug');
+const pageNoEl = document.getElementById('pageNo');
+const prevBtn = document.getElementById('prevPage');
+const nextBtn = document.getElementById('nextPage');
+const limitSelect = document.getElementById('limitSelect');
+const totalCountEl = document.getElementById('totalCount');
+const activeCountEl = document.getElementById('activeCount');
+const onDutyCountEl = document.getElementById('onDutyCount');
+const selectAll = document.getElementById('selectAll');
+const bulkOnDuty = document.getElementById('bulkOnDuty');
+const bulkOffDuty = document.getElementById('bulkOffDuty');
+const exportCsvBtn = document.getElementById('exportCsv');
+const csvFileInput = document.getElementById('csvFile');
+const toggleDebug = document.getElementById('toggleDebug');
+const saveTokenBtn = document.getElementById('saveTokenBtn');
+const toast = document.getElementById('toast');
+
+// 初始化
+function init(){
+  token = localStorage.getItem('debug_token') || localStorage.getItem('token') || '';
+  tokenInput.value = token;
+  baseUrlInput.value = localStorage.getItem('debug_base_url') || BASE_URL;
+  limitSelect.value = localStorage.getItem('debug_limit') || '20';
+  limit = Number(limitSelect.value);
+  addEventListeners();
+}
+
+function addEventListeners(){
+  fetchBtn.addEventListener('click', ()=>{page=1; fetchAssistants()});
+  refreshBtn.addEventListener('click', ()=>fetchAssistants());
+  prevBtn.addEventListener('click', ()=>{ if(page>1){page--; fetchAssistants()} });
+  nextBtn.addEventListener('click', ()=>{ page++; fetchAssistants() });
+  limitSelect.addEventListener('change', ()=>{ limit = Number(limitSelect.value); localStorage.setItem('debug_limit', limit); page=1; fetchAssistants() });
+  saveTokenBtn.addEventListener('click', ()=>{ localStorage.setItem('debug_token', tokenInput.value.trim()); showToast('Token 已保存'); });
+  toggleDebug.addEventListener('click', ()=>{ debugEl.style.display = debugEl.style.display==='none' ? 'block' : 'none' });
+  searchInput.addEventListener('keyup', (e)=>{ if(e.key==='Enter') { page=1; fetchAssistants() } });
+  selectAll.addEventListener('change', ()=>{ document.querySelectorAll('.rowSelect').forEach(cb=>cb.checked = selectAll.checked) });
+  bulkOnDuty.addEventListener('click', ()=>bulkSetDuty(true));
+  bulkOffDuty.addEventListener('click', ()=>bulkSetDuty(false));
+  exportCsvBtn.addEventListener('click', exportCurrentViewCSV);
+  csvFileInput.addEventListener('change', handleCsvImport);
+  saveBaseBtn.addEventListener('click', ()=>{ const v = baseUrlInput.value.trim(); if(v){ localStorage.setItem('debug_base_url', v); BASE_URL = v; showToast('后端地址已保存'); } else { showToast('请输入有效地址', true); } });
+}
+
+async function fetchAssistants(){
+  token = tokenInput.value.trim();
+  if(!token){ showToast('请先输入并保存 Token', true); }
+  const q = searchInput.value.trim();
+  const status = statusFilter.value;
+  const pos = positionFilter.value;
+  const url = new URL(BASE_URL + '/api/assistants');
+  url.searchParams.set('page', page);
+  url.searchParams.set('limit', limit);
+  if(q) url.searchParams.set('search', q);
+  if(status) url.searchParams.set('status', status);
+  if(pos) url.searchParams.set('position', pos);
+  logDebug(`GET ${url.toString()}`);
+  try{
+    const res = await fetch(url.toString(), { headers: { 'Authorization': 'Bearer ' + token } });
+    const data = await res.json();
+    if(!res.ok){ showToast(`请求失败: ${res.status}`, true); logDebug(JSON.stringify(data,null,2)); return; }
+    renderTable(data.data || data);
+    total = data.total || (data.data? data.data.length:0);
+    pageNoEl.textContent = page;
+    updateStats(data);
+    populatePositionFilter();
+    logDebug(`GET ${url.toString()}\n状态码: ${res.status}\n响应: ${JSON.stringify(data,null,2)}`);
+  }catch(err){ showToast('请求异常，请检查后端或控制台', true); logDebug(err); }
+}
+
+function renderTable(list){
+  tableBody.innerHTML = '';
+  positions = new Set([...positions]);
+  let active=0, onduty=0;
+  (list||[]).forEach(item=>{
+    positions.add(item.position||'');
+    const tr = document.createElement('tr');
+    const checked = '';
+    if(item.status==='active') active++;
+    if(item.isOnDuty) onduty++;
+    tr.innerHTML = `
+      <td><input type="checkbox" data-id="${item.id}" class="rowSelect checkbox"></td>
+      <td class="small">${item.studentId||''}</td>
+      <td>${escapeHtml(item.name||'')}</td>
+      <td><div class="editable" contenteditable="true" data-field="position" data-id="${item.id}">${escapeHtml(item.position||'')}</div></td>
+      <td class="small">${item.status==='active'? '在职':'离职'}</td>
+      <td><div class="editable" contenteditable="true" data-field="phone" data-id="${item.id}">${escapeHtml(item.phone||'')}</div></td>
+      <td><button data-id="${item.id}" class="toggleDuty">${item.isOnDuty? '设为下班':'设为上班'}</button></td>
+      <td><button data-id="${item.id}" class="saveRow">保存</button></td>
+    `;
+    tableBody.appendChild(tr);
+  });
+  totalCountEl.textContent = total;
+  activeCountEl.textContent = active;
+  onDutyCountEl.textContent = onduty;
+  bindRowActions();
+}
+
+function bindRowActions(){
+  document.querySelectorAll('.toggleDuty').forEach(btn=>{
+    btn.onclick = async (e)=>{
+      const id = e.target.dataset.id; const setOn = e.target.textContent.includes('上班');
+      if(!confirm(`确认将此学助设为${setOn? '上班':'下班'}？`)) return;
+      await setDuty(id, setOn);
+      fetchAssistants();
+    }
+  });
+  document.querySelectorAll('.saveRow').forEach(btn=>{
+    btn.onclick = async (e)=>{
+      const id = e.target.dataset.id;
+      const row = e.target.closest('tr');
+      const position = row.querySelector('[data-field=position]').textContent.trim();
+      const phone = row.querySelector('[data-field=phone]').textContent.trim();
+      await updateRow(id, { position, phone });
+      fetchAssistants();
+    }
+  });
+}
+
+async function setDuty(id, isOnDuty, silent=false){
+  const url = `${BASE_URL}/api/assistants/${id}/status`;
+  try{
+    const res = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+tokenInput.value.trim()}, body: JSON.stringify({ isOnDuty }) });
+    const data = await res.json();
+    if(!res.ok){ if(!silent) showToast(`操作失败: ${res.status}`, true); logDebug(JSON.stringify(data,null,2)); return; }
+    if(!silent) showToast('操作成功');
+    return data;
+  }catch(err){ if(!silent) showToast('操作异常', true); logDebug(err); }
+}
+
+async function updateRow(id, payload){
+  const url = `${BASE_URL}/api/assistants/${id}`;
+  try{
+    const res = await fetch(url, { method:'PUT', headers:{ 'Content-Type':'application/json','Authorization':'Bearer '+tokenInput.value.trim()}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if(!res.ok){ showToast(`更新失败: ${res.status}`, true); logDebug(JSON.stringify(data,null,2)); return; }
+    showToast('已保存');
+  }catch(err){ showToast('保存异常', true); logDebug(err); }
+}
+
+async function bulkSetDuty(isOn){
+  const ids = Array.from(document.querySelectorAll('.rowSelect:checked')).map(cb=>cb.dataset.id);
+  if(ids.length===0){ showToast('请先选择要操作的学助', true); return; }
+  if(!confirm(`确认批量将 ${ids.length} 名学助设为 ${isOn? '上班':'下班'}？`)) return;
+  try{
+    await Promise.all(ids.map(id => setDuty(id, isOn, true)));
+    showToast('批量操作完成');
+    fetchAssistants();
+  }catch(err){ showToast('批量操作异常', true); logDebug(err); }
+}
+
+function exportCurrentViewCSV(){
+  const rows = Array.from(tableBody.querySelectorAll('tr')).map(tr=>{
+    const tds = tr.querySelectorAll('td');
+    return [tds[1].textContent, tds[2].textContent, tds[3].textContent, tds[4].textContent, tds[5].textContent].map(s=>`"${(s||'').replace(/"/g,'""')}"`).join(',');
+  });
+  const csv = ['学号,姓名,岗位,状态,手机', ...rows].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `assistants_page${page}.csv`;
+  a.click();
+}
+
+async function handleCsvImport(e){
+  const f = e.target.files[0]; if(!f) return;
+  if(!confirm(`将上传文件 ${f.name} 进行导入？`)) return;
+  const form = new FormData();
+  form.append('file', f);
+  form.append('mode', 'upsert');
+  try{
+    const res = await fetch(BASE_URL + '/api/assistants/import-file', { method: 'POST', body: form, headers: { 'Authorization': 'Bearer ' + tokenInput.value.trim() } });
+    const data = await res.json();
+    if(!res.ok){ showToast(`导入失败: ${res.status}`, true); logDebug(JSON.stringify(data,null,2)); return; }
+    showToast('导入请求已完成');
+    fetchAssistants();
+  }catch(err){ showToast('导入异常', true); logDebug(err); }
+}
+
+function parseCsvLine(line){
+  const re = /"([^"]*(?:""[^"]*)*)"|([^,]+)/g; const res=[]; let m;
+  while((m=re.exec(line))!==null){ res.push(m[1]? m[1].replace(/""/g,'"'): (m[2]||'') ); }
+  return res;
+}
+
+function populatePositionFilter(){
+  const sel = positionFilter; sel.innerHTML = '<option value="">全部岗位</option>';
+  Array.from(positions).filter(Boolean).sort().forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p; sel.appendChild(o); });
+}
+
+function updateStats(data){
+  totalCountEl.textContent = data.total || (data.data? data.data.length:0);
+  activeCountEl.textContent = (data.data||[]).filter(i=>i.status==='active').length;
+  onDutyCountEl.textContent = (data.data||[]).filter(i=>i.isOnDuty).length;
+}
+
+function showToast(msg, isError=false){ toast.textContent = msg; toast.style.background = isError? '#b91c1c':'#111'; toast.style.display='block'; setTimeout(()=>toast.style.display='none',2500); }
+
+function logDebug(msg){ debugEl.style.display = 'block'; debugEl.textContent = typeof msg === 'string'? msg: JSON.stringify(msg,null,2); }
+
+function escapeHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// CSV helper for export - not needed separately
+
+init();
+</script>
+</body>
+</html>

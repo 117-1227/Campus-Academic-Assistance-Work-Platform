@@ -1,32 +1,37 @@
 // ---- Real API (USE_MOCK=false 时生效) ----
 
 async function request(path, options = {}) {
-  // Strip method prefix if present, e.g. "POST /api/admin/login" → "/api/admin/login"
+  // Strip method prefix if present
   let url = path.replace(/^[A-Z]+ /, '')
 
-  // Replace :param segments with values from body
-  // e.g. "/api/assistants/:id" + body.id="123" → "/api/assistants/123"
-  if (options.body) {
+  // Replace :param segments with values from body (JSON only)
+  if (options.body && typeof options.body === 'string') {
     try {
       const bodyObj = JSON.parse(options.body)
       url = url.replace(/:(\w+)/g, (_, key) => bodyObj[key] ?? `:${key}`)
-    } catch { /* not JSON, skip */ }
+    } catch { /* not JSON */ }
   }
 
   const headers = { 'Content-Type': 'application/json' }
 
-  // Attach JWT token if present
+  // Attach JWT token
   try {
     const token = localStorage.getItem('token')
     if (token) headers['Authorization'] = `Bearer ${token}`
   } catch { /* localStorage unavailable */ }
+
+  // For FormData, remove Content-Type so browser sets multipart boundary
+  const isFormData = options.body instanceof FormData
+  if (isFormData) delete headers['Content-Type']
 
   const config = { ...options, headers: { ...headers, ...(options.headers || {}) } }
   const res = await fetch(url, config)
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(data.message || `请求失败 (${res.status})`)
+    const msg = data.message || `请求失败 (${res.status})`
+    const detail = data.errors?.length ? ': ' + data.errors.join('; ') : ''
+    throw new Error(msg + detail)
   }
   // Unwrap backend envelope { ..., data: [...] } → return inner array
   if (Array.isArray(data)) return data
@@ -43,11 +48,11 @@ const USE_MOCK = false // 切换为 true 以启用 Mock 数据和路由
 /* ========== Mock Data ========== */
 
 let mockAssistants = [
-  { id: '1', studentId: '2021001', name: '张三', hourlyRate: '15.00', position: '图书助理', status: '在岗', phone: '13800138001' },
-  { id: '2', studentId: '2021002', name: '李四', hourlyRate: '12.00', position: '实验助理', status: '在岗', phone: '13800138002' },
-  { id: '3', studentId: '2021003', name: '王五', hourlyRate: '18.00', position: '活动助理', status: '离岗', phone: '13800138003' },
-  { id: '4', studentId: '2021004', name: '赵六', hourlyRate: '15.00', position: '课程助理', status: '在岗', phone: '13800138004' },
-  { id: '5', studentId: '2021005', name: '孙七', hourlyRate: '20.00', position: '教务助理', status: '在岗', phone: '13800138005' },
+  { id: '1', studentId: '2021001', name: '张三', positionLevel: '一级岗', position: '图书助理', status: 'active', isOnDuty: true, phone: '13800138001', createdAt: '2026-03-01T08:00:00Z' },
+  { id: '2', studentId: '2021002', name: '李四', positionLevel: '二级岗', position: '实验助理', status: 'active', isOnDuty: true, phone: '13800138002', createdAt: '2026-03-01T08:00:00Z' },
+  { id: '3', studentId: '2021003', name: '王五', positionLevel: '一级岗', position: '活动助理', status: 'inactive', isOnDuty: false, phone: '13800138003', createdAt: '2026-02-15T08:00:00Z' },
+  { id: '4', studentId: '2021004', name: '赵六', positionLevel: '二级岗', position: '课程助理', status: 'active', isOnDuty: false, phone: '13800138004', createdAt: '2026-03-01T08:00:00Z' },
+  { id: '5', studentId: '2021005', name: '孙七', positionLevel: '一级岗', position: '教务助理', status: 'active', isOnDuty: true, phone: '13800138005', createdAt: '2026-04-01T08:00:00Z' },
 ]
 
 let mockApprovals = [
@@ -127,12 +132,42 @@ const mockRoutes = {
   })),
 
   // -- Assistants --
-  'GET /api/assistants': mockHandler(() => [...mockAssistants]),
+  'GET /api/assistants': mockHandler((query) => {
+    let list = [...mockAssistants]
+    // Filters
+    if (query?.search) {
+      const q = query.search.toLowerCase()
+      list = list.filter((a) => (a.studentId||'').toLowerCase().includes(q) || (a.name||'').toLowerCase().includes(q) || (a.phone||'').includes(q))
+    }
+    if (query?.status === 'active') list = list.filter((a) => a.status === 'active')
+    if (query?.status === 'inactive') list = list.filter((a) => a.status === 'inactive')
+    // Pagination
+    const page = parseInt(query?.page) || 1
+    const limit = parseInt(query?.limit) || 10
+    const total = list.length
+    const start = (page - 1) * limit
+    const paged = list.slice(start, start + limit)
+    return { data: paged, total, page, limit }
+  }),
 
   'POST /api/assistants': mockHandler((body) => {
-    const newOne = { id: uid(), ...body, status: body.status || '在岗' }
+    // Check duplicate studentId
+    if (mockAssistants.some((a) => a.studentId === body.studentId)) {
+      throw new Error('学号已存在')
+    }
+    const newOne = {
+      id: uid(),
+      studentId: body.studentId,
+      name: body.name,
+      phone: body.phone || '',
+      positionLevel: body.positionLevel || '二级岗',
+      position: body.positionLevel === '一级岗' ? '教务助理' : '实验助理',
+      status: 'active',
+      isOnDuty: false,
+      createdAt: new Date().toISOString(),
+    }
     mockAssistants.push(newOne)
-    return newOne
+    return { status: 'success', data: newOne }
   }),
 
   'PUT /api/assistants/:id': mockHandler((id, body) => {
@@ -141,23 +176,46 @@ const mockRoutes = {
     return mockAssistants[idx]
   }),
 
+  'DELETE /api/assistants/:id': mockHandler((id) => {
+    mockAssistants = mockAssistants.filter((a) => a.id !== id)
+    return { success: true }
+  }),
+
   'POST /api/assistants/:id/reset-password': mockHandler(() => ({
     success: true, message: '密码已重置为 123456',
   })),
 
-  'POST /api/assistants/batch-delete': mockHandler((body) => {
-    const ids = body?.ids || []
-    mockAssistants = mockAssistants.filter((a) => !ids.includes(a.id))
-    return { success: true, deleted: ids.length }
+  'POST /api/assistants/:id/status': mockHandler((id, body) => {
+    const item = mockAssistants.find((a) => a.id === id)
+    if (item) item.isOnDuty = !!body.isOnDuty
+    return item
   }),
 
-  'POST /api/assistants/import': mockHandler(() => {
-    const imported = [
-      { id: uid(), studentId: '2021006', name: '周八', hourlyRate: '12.00', position: '课程助理', status: '在岗', phone: '13800138006' },
-      { id: uid(), studentId: '2021007', name: '吴九', hourlyRate: '15.00', position: '图书助理', status: '在岗', phone: '13800138007' },
-    ]
-    mockAssistants.push(...imported)
-    return { success: true, count: 2 }
+  'GET /api/assistants/stats': mockHandler(() => ({
+    total: mockAssistants.length,
+    active: mockAssistants.filter((a) => a.status === 'active').length,
+    inactive: mockAssistants.filter((a) => a.status === 'inactive').length,
+    onDuty: mockAssistants.filter((a) => a.isOnDuty).length,
+  })),
+
+  'POST /api/assistants/import': mockHandler((body) => {
+    const items = body?.data || []
+    let created = 0, failed = 0, errors = []
+    for (const item of items) {
+      if (!item.studentId || !item.name) { failed++; errors.push({ studentId: item.studentId, name: item.name, reason: '缺少必填字段' }); continue }
+      if (mockAssistants.some((a) => a.studentId === item.studentId)) { failed++; errors.push({ studentId: item.studentId, name: item.name, reason: '学号已存在' }); continue }
+      mockAssistants.push({
+        id: uid(), studentId: item.studentId, name: item.name, phone: item.phone || '',
+        positionLevel: item.positionLevel || '二级岗', position: item.positionLevel === '一级岗' ? '教务助理' : '实验助理',
+        status: 'active', isOnDuty: false, createdAt: new Date().toISOString(),
+      })
+      created++
+    }
+    return { summary: { total: items.length, created, updated: 0, skipped: 0, failed, success: created }, errors, message: `导入完成: 成功 ${created} 行，失败 ${failed} 行` }
+  }),
+
+  'POST /api/assistants/import-file': mockHandler(() => {
+    return { summary: { total: 2, created: 2, updated: 0, skipped: 0, failed: 0, success: 2 }, errors: [], message: '导入完成: 成功 2 行，失败 0 行' }
   }),
 
   // -- Work Hours --
@@ -251,9 +309,9 @@ const mockRoutes = {
   // ============ Student Routes ============
 
   'GET /api/student/profile': mockHandler(() => {
-    const sid = '2021001' // hardcoded for mock student
+    const sid = '2021001'
     const a = mockAssistants.find((x) => x.studentId === sid)
-    return a || { studentId: sid, name: '', position: '', hourlyRate: '', status: '', phone: '', joinDate: '' }
+    return a || { studentId: sid, name: '', position: '', positionLevel: '', status: 'inactive', phone: '', createdAt: '' }
   }),
 
   'GET /api/student/work-hours': mockHandler((query) => {

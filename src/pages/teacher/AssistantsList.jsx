@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback } from 'react'
 import Table from '../../components/Table'
 import { requestMock as request } from '../../utils/api'
 
-function toLevel(rate) {
-  const n = parseFloat(rate)
-  return n >= 15 ? '一级岗' : '二级岗'
+function statusLabel(s) {
+  if (s === 'active') return '在岗'
+  if (s === 'inactive') return '离岗'
+  return s || '-'
 }
 
 export default function AssistantsList() {
@@ -26,31 +27,24 @@ export default function AssistantsList() {
     return (a.studentId || '').toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q)
   })
 
-  const activeList = assistants.filter((a) => a.status === '在岗')
-  const inactiveList = assistants.filter((a) => a.status === '离岗')
+  const activeList = assistants.filter((a) => a.status === 'active')
+  const inactiveList = assistants.filter((a) => a.status === 'inactive')
 
   const columns = [
     { key: 'studentId', title: '学号' },
     { key: 'name', title: '姓名' },
     {
       key: 'position',
-      title: '岗位',
-    },
-    {
-      key: 'hourlyRate',
-      title: '等级',
+      title: '岗位等级',
       width: '112px',
-      render: (v) => {
-        const lv = toLevel(v)
+      render: (v, row) => {
+        const lv = v || row.positionLevel
+        if (!lv) return <span className="text-xs text-gray-400">-</span>
         return (
           <span className={
             'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ' +
-            (lv === '一级岗'
-              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-              : 'bg-amber-50 text-amber-700 border-amber-200')
-          }>
-            {lv}
-          </span>
+            (lv === '一级岗' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-amber-50 text-amber-700 border-amber-200')
+          }>{lv}</span>
         )
       },
     },
@@ -61,12 +55,10 @@ export default function AssistantsList() {
       render: (v) => (
         <span className={
           'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' +
-          (v === '在岗'
-            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-            : 'bg-gray-50 text-gray-500 border border-gray-200')
+          (v === 'active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-50 text-gray-500 border border-gray-200')
         }>
-          <span className={'w-2 h-2 rounded-full ' + (v === '在岗' ? 'bg-emerald-500' : 'bg-gray-400')} />
-          {v}
+          <span className={'w-2 h-2 rounded-full ' + (v === 'active' ? 'bg-emerald-500' : 'bg-gray-400')} />
+          {statusLabel(v)}
         </span>
       ),
     },

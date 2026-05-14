@@ -29,7 +29,7 @@ export default function ScheduleManagement() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const activeAssts = assistants.filter((a) => a.status === '在岗')
+  const activeAssts = assistants.filter((a) => a.status === 'active')
   const uniqueAssts = [...new Set(schedules.map((s) => s.studentId))].length
   const totalShifts = schedules.length
 
