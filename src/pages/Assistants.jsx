@@ -1,37 +1,31 @@
 import { useState, useEffect, useCallback } from 'react'
+import * as XLSX from 'xlsx'
 import Table from '../components/Table'
 import Modal from '../components/Modal'
 import { requestMock as request } from '../utils/api'
 
 const INITIAL_FORM = { studentId: '', name: '', positionLevel: '一级岗', phone: '' }
 
-function statusLabel(s) {
-  if (s === 'active') return '在岗'
-  if (s === 'inactive') return '离岗'
-  return s || '-'
-}
-
 export default function Assistants() {
   const [assistants, setAssistants] = useState([])
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [shiftFilter, setShiftFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(INITIAL_FORM)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState([])
   // Stats
-  const [stats, setStats] = useState({ total: 0, active: 0, onDuty: 0 })
+  const [stats, setStats] = useState({ total: 0, onShift: 0 })
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams({ limit: '100' })
     if (search) params.set('search', search)
-    if (statusFilter) params.set('status', statusFilter)
     const raw = await request(`GET /api/assistants?${params.toString()}`)
     setAssistants(Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : [])
     setLoading(false)
-  }, [search, statusFilter])
+  }, [search])
 
   const fetchStats = useCallback(async () => {
     const s = await request('GET /api/assistants/stats')
@@ -40,9 +34,9 @@ export default function Assistants() {
 
   useEffect(() => { fetchData(); fetchStats() }, [fetchData, fetchStats])
 
-  const filtered = assistants // server-side filtering via query params
-
-  const activeList = assistants.filter((a) => a.status === 'active')
+  const filtered = shiftFilter
+    ? assistants.filter((a) => shiftFilter === 'true' ? a.isOnShift === true : !a.isOnShift)
+    : assistants
 
   function openAddModal() {
     setEditing(null)
@@ -63,7 +57,7 @@ export default function Assistants() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    const payload = { ...form }
+    const payload = { ...form, position: form.positionLevel }
     if (editing) {
       await request('PUT /api/assistants/:id', {
         method: 'PUT',
@@ -87,20 +81,37 @@ export default function Assistants() {
     await fetchStats()
   }
 
-  async function toggleOnDuty(row) {
-    const newVal = !row.isOnDuty
+  async function toggleOnShift(row) {
+    const newVal = !row.isOnShift
     await request(`POST /api/assistants/:id/status`, {
       method: 'POST',
-      body: JSON.stringify({ id: row.id, isOnDuty: newVal }),
+      body: JSON.stringify({ id: row.id, isOnShift: newVal }),
     })
     await fetchData()
     await fetchStats()
   }
 
   async function resetPassword(row) {
-    if (!confirm(`确认将 ${row.name} 的密码重置为 123456？`)) return
-    await request(`POST /api/assistants/:id/reset-password`, { method: 'POST', body: '{}' })
-    alert('密码已重置为 123456')
+    const newPwd = (row.studentId || '').slice(-6)
+    if (!newPwd || newPwd.length < 6) { alert('学号不足6位，无法重置密码'); return }
+    if (!confirm(`确认将 ${row.name} 的密码重置为学号后六位（${newPwd}）？`)) return
+    const result = await request(`POST /api/assistants/${row.id}/reset-password`, { method: 'POST' })
+    alert(result.message || `密码已重置为 ${newPwd}`)
+  }
+
+  async function handleSync() {
+    if (!confirm('确认将当前所有学助数据同步到账户数据表？')) return
+    setLoading(true)
+    const result = await request('POST /api/admin/sync-accounts', { method: 'POST' })
+    alert(result.message || '同步完成')
+    setLoading(false)
+  }
+
+  const COLUMN_MAP = {
+    '学号': 'studentId', 'studentId': 'studentId', 'student_id': 'studentId',
+    '姓名': 'name', 'name': 'name',
+    '手机号': 'phone', 'phone': 'phone', 'phone_number': 'phone',
+    '岗位等级': 'positionLevel', 'positionLevel': 'positionLevel', 'position_level': 'positionLevel',
   }
 
   async function handleImport(e) {
@@ -110,18 +121,65 @@ export default function Assistants() {
       alert('请上传 .csv / .xlsx / .xls 格式的文件')
       return
     }
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('mode', 'upsert')
-    const result = await request('POST /api/assistants/import-file', {
-      method: 'POST',
-      body: formData,
-      headers: {}, // let browser set Content-Type for multipart
-    })
-    alert(result.message || `导入完成`)
-    await fetchData()
-    await fetchStats()
-    e.target.value = ''
+    setLoading(true)
+    try {
+      // Parse file in browser
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const sheetName = workbook.SheetNames[0]
+      const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+
+      if (!rawData.length) { alert('文件中没有数据'); setLoading(false); e.target.value = ''; return }
+
+      // Map columns, fill defaults, filter out completely empty rows
+      const mapped = rawData.map((row) => {
+        const item = { studentId: '', name: '', phone: '', positionLevel: '二级岗' }
+        for (const [key, val] of Object.entries(row)) {
+          const mappedKey = COLUMN_MAP[key.trim()]
+          if (mappedKey) item[mappedKey] = String(val).trim()
+        }
+        return item
+      }).filter((item) => item.studentId || item.name)
+
+      if (!mapped.length) { alert('未识别到有效数据，请检查列名'); setLoading(false); e.target.value = ''; return }
+
+      // Send as JSON to import endpoint
+      const payload = { data: mapped, mode: 'upsert' }
+      console.log('导入数据:', payload)
+
+      const token = localStorage.getItem('token')
+      const rawRes = await fetch('/api/assistants/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` },
+        body: JSON.stringify(payload),
+      })
+      const rawText = await rawRes.text()
+      console.log('后端原始响应:', rawRes.status, rawText.slice(0, 1000))
+
+      if (!rawRes.ok) {
+        let errMsg = `请求失败 (${rawRes.status})`
+        try {
+          const d = JSON.parse(rawText)
+          errMsg = d.message || d.error || errMsg
+          if (d.invalidRows?.length) {
+            const details = d.invalidRows.slice(0, 5).map((r) => `${r.studentId || r.rowIndex}: ${r.reason}`).join('\n')
+            errMsg += '\n' + details
+            if (d.invalidRows.length > 5) errMsg += `\n... 等 ${d.invalidRows.length} 条`
+          }
+        } catch {}
+        throw new Error(errMsg)
+      }
+      const result = JSON.parse(rawText)
+      alert(result.message || `导入完成：${result.summary?.success || mapped.length} 条`)
+      await fetchData()
+      await fetchStats()
+    } catch (err) {
+      console.error('导入失败详情:', err)
+      alert('导入失败: ' + (err.message || '解析错误'))
+    } finally {
+      setLoading(false)
+      e.target.value = ''
+    }
   }
 
   function handleSelect(row, checked) {
@@ -165,119 +223,124 @@ export default function Assistants() {
         )
       },
     },
+    { key: 'phone', title: '手机' },
     {
-      key: 'status',
+      key: 'isOnShift',
       title: '状态',
-      width: '96px',
-      render: (v) => (
+      width: '104px',
+      render: (_, row) => (
         <span className={
-          'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium ' +
-          (v === 'active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-50 text-gray-500 border border-gray-200')
+          'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ' +
+          (row.isOnShift
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : 'bg-rose-50 text-rose-600 border-rose-200')
         }>
-          <span className={'w-2 h-2 rounded-full ' + (v === 'active' ? 'bg-emerald-500' : 'bg-gray-400')} />
-          {statusLabel(v)}
+          {row.isOnShift ? '上班中' : '下班中'}
         </span>
       ),
     },
-    { key: 'phone', title: '手机' },
     {
-      key: 'isOnDuty',
+      key: 'isOnShift-action',
       title: '上/下班',
       width: '96px',
       render: (_, row) => (
         <button
-          onClick={() => toggleOnDuty(row)}
+          onClick={() => toggleOnShift(row)}
           className={
             'px-3 py-1 text-xs font-medium rounded-md transition-colors ' +
-            (row.isOnDuty
+            (row.isOnShift
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
               : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100')
           }
         >
-          {row.isOnDuty ? '上班' : '下班'}
+          {row.isOnShift ? '上班' : '下班'}
         </button>
       ),
     },
     {
       key: 'actions',
       title: '操作',
-      width: '192px',
+      width: '80px',
       render: (_, row) => (
-        <div className="flex items-center">
-          <button onClick={() => openEditModal(row)} className="px-3 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors">编辑</button>
-          <button onClick={() => resetPassword(row)} className="px-3 py-1 text-xs font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors">重置密码</button>
-          <button onClick={() => handleDelete(row)} className="ml-2 p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors" title="删除">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-            </svg>
-          </button>
-        </div>
+        <button onClick={() => openEditModal(row)} className="px-3 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors">编辑</button>
       ),
     },
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-5">
         <div className="card-8pt">
           <p className="stat-label text-gray-500">学助总数</p>
           <p className="stat-number text-gray-900">{stats.total || assistants.length}</p>
           <p className="text-xs text-gray-400 mt-1 leading-body">
-            在岗 {stats.active || activeList.length} 人
+            上班 {stats.onShift || assistants.filter((a) => a.isOnShift).length} 人
           </p>
         </div>
         <div className="card-8pt">
           <p className="stat-label text-gray-500">上班人数</p>
-          <p className="stat-number text-emerald-600">{stats.onDuty || assistants.filter((a) => a.isOnDuty).length}</p>
+          <p className="stat-number text-emerald-600">{stats.onShift || assistants.filter((a) => a.isOnShift).length}</p>
           <p className="text-xs text-gray-400 mt-1 leading-body">
-            占比 {assistants.length > 0 ? Math.round(((stats.onDuty || assistants.filter((a) => a.isOnDuty).length) / assistants.length) * 100) : 0}%
+            占比 {assistants.length > 0 ? Math.round(((stats.onShift || assistants.filter((a) => a.isOnShift).length) / assistants.length) * 100) : 0}%
           </p>
         </div>
         <div className="card-8pt">
-          <p className="stat-label text-gray-500">离岗人数</p>
-          <p className="stat-number text-gray-400">{assistants.filter((a) => a.status === 'inactive').length}</p>
-          <p className="text-xs text-gray-400 mt-1 leading-body">暂不参与排班</p>
+          <p className="stat-label text-gray-500">下班人数</p>
+          <p className="stat-number text-gray-400">{assistants.filter((a) => !a.isOnShift).length}</p>
+          <p className="text-xs text-gray-400 mt-1 leading-body">未在班状态</p>
         </div>
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 max-w-sm min-w-[180px]">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-          </svg>
-          <input type="text" placeholder="搜索学号或姓名..." value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full h-10 text-sm bg-white border border-gray-300 rounded-lg pl-8 pr-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-shadow placeholder:text-gray-400"
-          />
+      <div className="flex items-center gap-3">
+        {/* Left: search + filter */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="relative flex-1 max-w-xs">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+            <input type="text" placeholder="搜索学号或姓名..." value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full h-10 text-sm bg-white border border-gray-300 rounded-lg pl-8 pr-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-shadow placeholder:text-gray-400"
+            />
+          </div>
+          <select value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)}
+            className="h-10 px-3 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+            <option value="">全部班次</option>
+            <option value="true">上班</option>
+            <option value="false">下班</option>
+          </select>
+          {loading && <span className="text-xs text-gray-400 ml-2">加载中...</span>}
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-10 px-3 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
-          <option value="">全部状态</option>
-          <option value="active">在岗</option>
-          <option value="inactive">离岗</option>
-        </select>
 
-        <button onClick={openAddModal} className="btn-8pt text-white bg-[#0f172a] hover:bg-[#1e293b]">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-          添加学助
-        </button>
-
-        {selected.length > 0 && (
-          <button onClick={handleBatchDelete} className="btn-8pt text-red-600 bg-white border border-red-200 hover:bg-red-50">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-            删除所选 {selected.length} 项
+        {/* Right: actions */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={openAddModal} className="btn-8pt text-white bg-[#0f172a] hover:bg-[#1e293b]">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            添加学助
           </button>
-        )}
 
-        <label className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">
-          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
-          批量导入
-          <input type="file" accept=".csv,.xlsx,.xls" onChange={handleImport} className="hidden" />
-        </label>
+          {selected.length > 0 && (
+            <button onClick={handleBatchDelete} className="btn-8pt text-red-600 bg-white border border-red-200 hover:bg-red-50">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+              删除所选 {selected.length} 项
+            </button>
+          )}
 
-        {loading && <span className="text-xs text-gray-400">加载中...</span>}
+          <label className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 cursor-pointer">
+            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+            批量导入
+            <input type="file" accept=".csv,.xlsx,.xls" onChange={handleImport} className="hidden" />
+          </label>
+
+          <button onClick={handleSync} className="btn-8pt text-white bg-emerald-600 hover:bg-emerald-700">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+            </svg>
+            同步到账户表
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -296,10 +359,22 @@ export default function Assistants() {
         onClose={() => setModalOpen(false)}
         title={editing ? '编辑学助信息' : '添加学助'}
         footer={
-          <>
-            <button onClick={() => setModalOpen(false)} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">取消</button>
-            <button form="assistant-form" type="submit" className="btn-8pt text-white bg-[#0f172a] hover:bg-[#1e293b]">{editing ? '保存修改' : '确认添加'}</button>
-          </>
+          editing ? (
+            <>
+              <button onClick={() => { if (confirm(`确认删除 ${editing.name} (${editing.studentId})？此操作不可撤销。`)) { handleDelete(editing); setModalOpen(false) } }} className="btn-8pt text-red-600 bg-white border border-red-200 hover:bg-red-50 mr-auto">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                删除
+              </button>
+              <button onClick={() => { resetPassword(editing) }} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">重置密码</button>
+              <button onClick={() => setModalOpen(false)} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">取消</button>
+              <button form="assistant-form" type="submit" className="btn-8pt text-white bg-[#0f172a] hover:bg-[#1e293b]">保存修改</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setModalOpen(false)} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">取消</button>
+              <button form="assistant-form" type="submit" className="btn-8pt text-white bg-[#0f172a] hover:bg-[#1e293b]">确认添加</button>
+            </>
+          )
         }
       >
         <form id="assistant-form" onSubmit={handleSubmit} className="space-y-4">
