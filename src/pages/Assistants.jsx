@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import Table from '../components/Table'
 import Modal from '../components/Modal'
-import { requestMock as request } from '../utils/api'
+import { request } from '../utils/api'
 
 const INITIAL_FORM = { studentId: '', name: '', positionLevel: '一级岗', phone: '' }
 
@@ -17,6 +17,11 @@ export default function Assistants() {
   const [selected, setSelected] = useState([])
   // Stats
   const [stats, setStats] = useState({ total: 0, onShift: 0 })
+  // Time logs
+  const [timelogModal, setTimelogModal] = useState(null)
+  const [timelogs, setTimelogs] = useState([])
+  const [timelogLoading, setTimelogLoading] = useState(false)
+  const [timelogForm, setTimelogForm] = useState({ date: new Date().toISOString().slice(0, 10), hours: '', notes: '' })
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -59,9 +64,9 @@ export default function Assistants() {
     e.preventDefault()
     const payload = { ...form, position: form.positionLevel }
     if (editing) {
-      await request('PUT /api/assistants/:id', {
+      await request(`PUT /api/assistants/${editing.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ id: editing.id, ...payload }),
+        body: JSON.stringify(payload),
       })
     } else {
       await request('POST /api/assistants', {
@@ -83,9 +88,9 @@ export default function Assistants() {
 
   async function toggleOnShift(row) {
     const newVal = !row.isOnShift
-    await request(`POST /api/assistants/:id/status`, {
+    await request(`POST /api/assistants/${row.id}/status`, {
       method: 'POST',
-      body: JSON.stringify({ id: row.id, isOnShift: newVal }),
+      body: JSON.stringify({ isOnShift: newVal }),
     })
     await fetchData()
     await fetchStats()
@@ -97,6 +102,40 @@ export default function Assistants() {
     if (!confirm(`确认将 ${row.name} 的密码重置为学号后六位（${newPwd}）？`)) return
     const result = await request(`POST /api/assistants/${row.id}/reset-password`, { method: 'POST' })
     alert(result.message || `密码已重置为 ${newPwd}`)
+  }
+
+  // --- Time log functions ---
+  async function fetchTimelogs(assistantId) {
+    setTimelogLoading(true)
+    try {
+      const result = await request(`GET /api/assistants/${assistantId}/timelogs`)
+      setTimelogs(Array.isArray(result) ? result : Array.isArray(result?.data) ? result.data : [])
+    } catch { setTimelogs([]) }
+    setTimelogLoading(false)
+  }
+
+  function openTimelogModal(row) {
+    setTimelogModal(row)
+    setTimelogs([])
+    setTimelogForm({ date: new Date().toISOString().slice(0, 10), hours: '', notes: '' })
+    fetchTimelogs(row.id)
+  }
+
+  function closeTimelogModal() {
+    setTimelogModal(null)
+    setTimelogs([])
+  }
+
+  async function addTimelog(e) {
+    e.preventDefault()
+    const { date, hours, notes } = timelogForm
+    if (!date || !hours) { alert('请填写日期和工时'); return }
+    await request(`POST /api/assistants/${timelogModal.id}/timelogs`, {
+      method: 'POST',
+      body: JSON.stringify({ date, hours: Number(hours), notes: notes.trim() }),
+    })
+    setTimelogForm({ date: new Date().toISOString().slice(0, 10), hours: '', notes: '' })
+    fetchTimelogs(timelogModal.id)
   }
 
   async function handleSync() {
@@ -260,9 +299,12 @@ export default function Assistants() {
     {
       key: 'actions',
       title: '操作',
-      width: '80px',
+      width: '120px',
       render: (_, row) => (
-        <button onClick={() => openEditModal(row)} className="px-3 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors">编辑</button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => openEditModal(row)} className="px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors">编辑</button>
+          <button onClick={() => openTimelogModal(row)} className="px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-md transition-colors">日志</button>
+        </div>
       ),
     },
   ]
@@ -412,6 +454,82 @@ export default function Assistants() {
           </div>
         </form>
       </Modal>
+
+      {/* Time log Modal */}
+      <Modal
+        isOpen={!!timelogModal}
+        onClose={closeTimelogModal}
+        title={timelogModal ? `${timelogModal.name} (${timelogModal.studentId}) 工时日志` : '工时日志'}
+        footer={
+          <>
+            <button onClick={closeTimelogModal} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">关闭</button>
+          </>
+        }
+      >
+        <div className="space-y-6">
+          {/* Add form */}
+          <form onSubmit={addTimelog} className="flex items-end gap-3 p-4 bg-gray-50 rounded-lg">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">日期</label>
+              <input type="date" required value={timelogForm.date}
+                onChange={(e) => setTimelogForm((p) => ({ ...p, date: e.target.value }))}
+                className="h-9 px-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">工时 (h)</label>
+              <input type="number" required value={timelogForm.hours}
+                onChange={(e) => setTimelogForm((p) => ({ ...p, hours: e.target.value }))}
+                min="0.5" max="24" step="0.5" placeholder="例如 2.5"
+                className="w-24 h-9 px-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">备注</label>
+              <input value={timelogForm.notes}
+                onChange={(e) => setTimelogForm((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="可选备注"
+                className="w-full h-9 px-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <button type="submit" className="btn-8pt text-white bg-indigo-600 hover:bg-indigo-700 shrink-0">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+              添加
+            </button>
+          </form>
+
+          {/* Log list */}
+          {timelogLoading ? (
+            <p className="text-sm text-gray-400 text-center py-8">加载中...</p>
+          ) : timelogs.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">暂无工时日志记录</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 text-left">
+                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">日期</th>
+                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">工时</th>
+                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">创建时间</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {timelogs.map((log) => (
+                  <tr key={log.id}>
+                    <td className="py-3 text-gray-900 tabular-nums">{log.date || '—'}</td>
+                    <td className="py-3">
+                      <span className="font-semibold text-indigo-600 tabular-nums">{log.hours != null ? log.hours + 'h' : '—'}</span>
+                    </td>
+                    <td className="py-3 text-gray-500 text-xs">
+                      {log.createdAt ? new Date(log.createdAt).toLocaleString('zh-CN') : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Modal>
+
     </div>
   )
 }

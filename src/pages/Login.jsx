@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { requestMock as request } from '../utils/api'
+import { request } from '../utils/api'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')

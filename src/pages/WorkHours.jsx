@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Table from '../components/Table'
-import { requestMock as request } from '../utils/api'
+import { request } from '../utils/api'
 
 function monthToRange(monthStr) {
   if (!monthStr) return { from: '', to: '' }

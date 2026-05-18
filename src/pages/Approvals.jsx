@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Table from '../components/Table'
 import Modal from '../components/Modal'
-import { requestMock as request } from '../utils/api'
+import { request } from '../utils/api'
 
 export default function Approvals() {
   const [tab, setTab] = useState('pending')
@@ -15,7 +15,7 @@ export default function Approvals() {
     setLoading(true)
     const [pending, history] = await Promise.all([
       request('GET /api/approvals?status=pending'),
-      request('GET /approvals?status=all'),
+      request('GET /api/approvals?status=all'),
     ])
     setPendingList(pending)
     setHistoryList(history.filter((a) => a.status !== 'pending'))
@@ -29,9 +29,8 @@ export default function Approvals() {
 
   async function approve(item) {
     if (!confirm(`确认通过 ${item.applicant} (${item.studentId}) 的补卡申请？`)) return
-    await request(`POST /approvals/:id/approve`, {
+    await request(`POST /api/approvals/${item.id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ id: item.id }),
     })
     await fetchData()
   }
@@ -44,9 +43,9 @@ export default function Approvals() {
   async function confirmReject() {
     const item = rejectModal.item
     if (!rejectReason.trim()) { alert('请填写拒绝理由'); return }
-    await request(`POST /approvals/:id/reject`, {
+    await request(`POST /api/approvals/${item.id}/reject`, {
       method: 'POST',
-      body: JSON.stringify({ id: item.id, reason: rejectReason.trim() }),
+      body: JSON.stringify({ reason: rejectReason.trim() }),
     })
     setRejectModal({ open: false, item: null })
     setRejectReason('')
