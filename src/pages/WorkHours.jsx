@@ -2,6 +2,30 @@ import { useState, useEffect, useCallback } from 'react'
 import Table from '../components/Table'
 import { requestMock as request } from '../utils/api'
 
+function monthToRange(monthStr) {
+  if (!monthStr) return { from: '', to: '' }
+  const [y, m] = monthStr.split('-')
+  const lastDay = new Date(+y, +m, 0).getDate()
+  return {
+    from: `${y}-${m}-01`,
+    to: `${y}-${m}-${String(lastDay).padStart(2, '0')}`,
+  }
+}
+
+const SHIFT_LABEL = { morning: '上午班', afternoon: '下午班', evening: '晚班', other: '其他' }
+const STATUS_LABEL = { open: '进行中', closed: '已下班', auto_closed: '系统收口', pending_confirm: '待确认', corrected: '已纠正' }
+
+function formatTime(t) {
+  if (!t) return '—'
+  const d = new Date(t)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function formatHours(h) {
+  if (h == null) return '—'
+  return Number(h).toFixed(1) + 'h'
+}
+
 export default function WorkHours() {
   const currentMonth = new Date().toISOString().slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
@@ -13,8 +37,10 @@ export default function WorkHours() {
   const fetchData = useCallback(async () => {
     if (!month) return
     setLoading(true)
-    const list = await request(`GET /api/work-hours?month=${month}`)
-    setData(Array.isArray(list) ? list : [])
+    const { from, to } = monthToRange(month)
+    const result = await request(`GET /api/admin/attendance/report?from=${from}&to=${to}&limit=200`)
+    const list = Array.isArray(result.data) ? result.data : Array.isArray(result) ? result : []
+    setData(list)
     setExpandedRow(null)
     setDailyDetail(null)
     setLoading(false)
@@ -23,19 +49,20 @@ export default function WorkHours() {
   useEffect(() => { fetchData() }, [fetchData])
 
   async function toggleDetail(row) {
-    if (expandedRow === row.studentId) {
+    if (expandedRow === row.id) {
       setExpandedRow(null)
       setDailyDetail(null)
       return
     }
-    setExpandedRow(row.studentId)
+    setExpandedRow(row.id)
     setDailyDetail(null)
-    const detail = await request(`GET /api/work-hours/${row.studentId}?month=${month}`)
+    const { from, to } = monthToRange(month)
+    const detail = await request(`GET /api/admin/attendance/assistants/${row.id}/summary?from=${from}&to=${to}`)
     setDailyDetail(detail)
   }
 
-  const totalHours = data.reduce((sum, r) => sum + (r.totalHours || 0), 0)
-  const totalDays = data.reduce((sum, r) => sum + (r.workDays || 0), 0)
+  const totalHours = data.reduce((sum, r) => sum + (Number(r.totalHours) || 0), 0)
+  const totalWage = data.reduce((sum, r) => sum + (Number(r.estimatedWage) || 0), 0)
   const avgHours = data.length > 0 ? (totalHours / data.length).toFixed(1) : '0'
 
   const columns = [
@@ -43,30 +70,30 @@ export default function WorkHours() {
     { key: 'name', title: '姓名' },
     {
       key: 'totalHours',
-      title: '本月总工时',
-      render: (v) => <span className="font-semibold text-gray-900 tabular-nums">{v}h</span>,
+      title: '总工时',
+      render: (v) => <span className="font-semibold text-gray-900 tabular-nums">{formatHours(v)}</span>,
     },
     {
-      key: 'workDays',
-      title: '出勤天数',
-      render: (v) => <span className="tabular-nums">{v} 天</span>,
+      key: 'estimatedWage',
+      title: '估算薪资',
+      render: (v) => <span className="tabular-nums">{v != null ? '¥' + Number(v).toFixed(2) : '—'}</span>,
     },
   ]
 
   return (
-    <div className="space-y-6">
-      {/* ---- Stats Cards: grid gap-4(16), card p-6(24) ---- */}
-      <div className="grid grid-cols-3 gap-4">
+    <div className="space-y-8">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-3 gap-5">
         <div className="card-8pt">
           <p className="stat-label text-gray-500">本月总工时</p>
-          <p className="stat-number text-indigo-600">{totalHours}h</p>
+          <p className="stat-number text-indigo-600">{totalHours.toFixed(1)}h</p>
           <p className="text-xs text-gray-400 mt-1 leading-body">
             {data.length} 人参与
           </p>
         </div>
         <div className="card-8pt">
-          <p className="stat-label text-gray-500">总出勤天数</p>
-          <p className="stat-number text-gray-900">{totalDays}</p>
+          <p className="stat-label text-gray-500">预估总薪资</p>
+          <p className="stat-number text-emerald-600">¥{totalWage.toFixed(2)}</p>
           <p className="text-xs text-gray-400 mt-1 leading-body">
             人均 {avgHours}h
           </p>
@@ -80,8 +107,8 @@ export default function WorkHours() {
         </div>
       </div>
 
-      {/* ---- Month picker: h-10(40) ---- */}
-      <div className="flex items-center gap-3">
+      {/* Month picker */}
+      <div className="flex items-center gap-4">
         <div className="relative">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
@@ -99,49 +126,80 @@ export default function WorkHours() {
         {loading && <span className="text-xs text-gray-400">加载中...</span>}
       </div>
 
-      {/* ---- Table ---- */}
+      {/* Table */}
       <Table
         columns={columns}
         data={data}
         onRowClick={toggleDetail}
       />
 
-      {/* ---- Daily detail panel: p-6(24) ---- */}
+      {/* Daily detail panel */}
       {expandedRow && dailyDetail && (
         <div className="card-8pt">
-          {/* Detail header: gap-3(12) mb-4(16) */}
           <div className="flex items-center gap-3 mb-4">
             <span className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold">
-              {dailyDetail.name?.charAt(0) || '?'}
+              {(dailyDetail.assistant?.name || '?').charAt(0)}
             </span>
             <div>
-              <h4 className="text-sm font-semibold text-gray-900 leading-title">{dailyDetail.name}</h4>
-              <p className="text-xs text-gray-500 leading-body">{expandedRow}</p>
+              <h4 className="text-sm font-semibold text-gray-900">{dailyDetail.assistant?.name || '—'}</h4>
+              <p className="text-xs text-gray-500">{dailyDetail.assistant?.studentId || expandedRow}</p>
             </div>
-            <span className="ml-auto text-xs text-gray-400">每日打卡明细</span>
+            <div className="ml-auto flex items-center gap-6">
+              <span className="text-xs text-gray-500">总工时 <strong className="text-gray-900">{formatHours(dailyDetail.totalHours)}</strong></span>
+              <span className="text-xs text-gray-500">薪资 <strong className="text-emerald-600">{dailyDetail.estimatedWage != null ? '¥' + Number(dailyDetail.estimatedWage).toFixed(2) : '—'}</strong></span>
+            </div>
           </div>
 
-          {dailyDetail.daily && dailyDetail.daily.length > 0 ? (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-left">
-                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">日期</th>
-                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">工时</th>
-                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">签到</th>
-                  <th className="pb-3 text-xs font-medium text-gray-500 uppercase tracking-wide">签退</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {dailyDetail.daily.map((d) => (
-                  <tr key={d.date}>
-                    <td className="py-3 text-gray-700">{d.date}</td>
-                    <td className="py-3 text-gray-900 font-medium tabular-nums">{d.hours}h</td>
-                    <td className="py-3 text-gray-600">{d.checkIn}</td>
-                    <td className="py-3 text-gray-600">{d.checkOut}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {dailyDetail.byDate && dailyDetail.byDate.length > 0 ? (
+            dailyDetail.byDate.map((day) => (
+              <div key={day.date} className="mb-4 last:mb-0">
+                <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-gray-50 rounded-lg">
+                  <span className="text-sm font-semibold text-gray-700">{day.date}</span>
+                  <span className="text-xs text-gray-500">{day.hours}h</span>
+                  {day.hasAnomalies && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">含异常</span>
+                  )}
+                  <span className="ml-auto text-xs text-gray-400">{day.sessions?.length || 0} 条打卡</span>
+                </div>
+                {day.sessions && day.sessions.length > 0 && (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-left">
+                        <th className="pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">班次</th>
+                        <th className="pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">签到</th>
+                        <th className="pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">签退</th>
+                        <th className="pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">工时</th>
+                        <th className="pb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">状态</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {day.sessions.map((s, i) => (
+                        <tr key={i}>
+                          <td className="py-3 text-gray-700">{SHIFT_LABEL[s.shiftType] || s.shiftType || '—'}</td>
+                          <td className="py-3 text-gray-600 tabular-nums">{formatTime(s.startTime)}</td>
+                          <td className="py-3 text-gray-600 tabular-nums">{formatTime(s.endTime)}</td>
+                          <td className="py-3 text-gray-900 font-medium tabular-nums">
+                            {s.durationMinutes != null ? (s.durationMinutes / 60).toFixed(1) + 'h' : '—'}
+                          </td>
+                          <td className="py-3">
+                            <span className={
+                              'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ' +
+                              (s.status === 'closed' || s.status === 'corrected'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : s.status === 'auto_closed' || s.status === 'pending_confirm'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200')
+                            }>
+                              {STATUS_LABEL[s.status] || s.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))
           ) : (
             <p className="text-sm text-gray-400 py-4 text-center">本月暂无打卡记录</p>
           )}

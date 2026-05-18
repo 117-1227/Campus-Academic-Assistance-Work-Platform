@@ -23,7 +23,9 @@ async function request(path, options = {}) {
   const config = { ...options, headers: { ...headers, ...(options.headers || {}) } }
   const res = await fetch(url, config)
 
-  const data = await res.json().catch(() => ({}))
+  const text = await res.text().catch(() => '')
+  let data = {}
+  try { data = JSON.parse(text) } catch { data.message = text.slice(0, 500) || `请求失败 (${res.status})` }
   if (!res.ok) {
     const msg = data.message || `请求失败 (${res.status})`
     const detail = data.errors?.length ? ': ' + data.errors.join('; ') : ''
@@ -38,16 +40,16 @@ async function request(path, options = {}) {
 
 // ---- Mock layer ----
 
-const USE_MOCK = false 
+const USE_MOCK = false
 
 /* ===== Mock Data ===== */
 
 let mockAssistants = [
-  { id: '1', studentId: '2021001', name: '张三', positionLevel: '一级岗', position: '图书助理', status: 'active', isOnDuty: true, phone: '13800138001', createdAt: '2026-03-01T08:00:00Z' },
-  { id: '2', studentId: '2021002', name: '李四', positionLevel: '二级岗', position: '实验助理', status: 'active', isOnDuty: true, phone: '13800138002', createdAt: '2026-03-01T08:00:00Z' },
-  { id: '3', studentId: '2021003', name: '王五', positionLevel: '一级岗', position: '活动助理', status: 'inactive', isOnDuty: false, phone: '13800138003', createdAt: '2026-02-15T08:00:00Z' },
-  { id: '4', studentId: '2021004', name: '赵六', positionLevel: '二级岗', position: '课程助理', status: 'active', isOnDuty: false, phone: '13800138004', createdAt: '2026-03-01T08:00:00Z' },
-  { id: '5', studentId: '2021005', name: '孙七', positionLevel: '一级岗', position: '教务助理', status: 'active', isOnDuty: true, phone: '13800138005', createdAt: '2026-04-01T08:00:00Z' },
+  { id: '1', studentId: '2021001', name: '张三', positionLevel: '一级岗', position: '图书助理', status: 'active', isOnShift: true, phone: '13800138001', createdAt: '2026-03-01T08:00:00Z' },
+  { id: '2', studentId: '2021002', name: '李四', positionLevel: '二级岗', position: '实验助理', status: 'active', isOnShift: true, phone: '13800138002', createdAt: '2026-03-01T08:00:00Z' },
+  { id: '3', studentId: '2021003', name: '王五', positionLevel: '一级岗', position: '活动助理', status: 'inactive', isOnShift: false, phone: '13800138003', createdAt: '2026-02-15T08:00:00Z' },
+  { id: '4', studentId: '2021004', name: '赵六', positionLevel: '二级岗', position: '课程助理', status: 'active', isOnShift: false, phone: '13800138004', createdAt: '2026-03-01T08:00:00Z' },
+  { id: '5', studentId: '2021005', name: '孙七', positionLevel: '一级岗', position: '教务助理', status: 'active', isOnShift: true, phone: '13800138005', createdAt: '2026-04-01T08:00:00Z' },
 ]
 
 let mockApprovals = [
@@ -110,8 +112,8 @@ const mockRoutes = {
       const q = query.search.toLowerCase()
       list = list.filter((a) => (a.studentId||'').toLowerCase().includes(q) || (a.name||'').toLowerCase().includes(q) || (a.phone||'').includes(q))
     }
-    if (query?.status === 'active') list = list.filter((a) => a.status === 'active')
-    if (query?.status === 'inactive') list = list.filter((a) => a.status === 'inactive')
+    if (query?.isOnShift === 'true') list = list.filter((a) => a.isOnShift === true)
+    if (query?.isOnShift === 'false') list = list.filter((a) => a.isOnShift === false || a.isOnShift == null)
     const page = parseInt(query?.page) || 1
     const limit = parseInt(query?.limit) || 10
     const total = list.length
@@ -128,7 +130,7 @@ const mockRoutes = {
       id: uid(), studentId: body.studentId, name: body.name,
       phone: body.phone || '', positionLevel: body.positionLevel || '二级岗',
       position: body.positionLevel === '一级岗' ? '教务助理' : '实验助理',
-      status: 'active', isOnDuty: false, createdAt: new Date().toISOString(),
+      status: 'active', isOnShift: false, createdAt: new Date().toISOString(),
     }
     mockAssistants.push(newOne)
     return { status: 'success', data: newOne }
@@ -151,15 +153,13 @@ const mockRoutes = {
 
   'POST /api/assistants/:id/status': mockHandler((id, body) => {
     const item = mockAssistants.find((a) => a.id === id)
-    if (item) item.isOnDuty = !!body.isOnDuty
+    if (item) item.isOnShift = !!body.isOnShift
     return item
   }),
 
   'GET /api/assistants/stats': mockHandler(() => ({
     total: mockAssistants.length,
-    active: mockAssistants.filter((a) => a.status === 'active').length,
-    inactive: mockAssistants.filter((a) => a.status === 'inactive').length,
-    onDuty: mockAssistants.filter((a) => a.isOnDuty).length,
+    onShift: mockAssistants.filter((a) => a.isOnShift).length,
   })),
 
   'POST /api/assistants/import': mockHandler((body) => {
@@ -171,11 +171,26 @@ const mockRoutes = {
       mockAssistants.push({
         id: uid(), studentId: item.studentId, name: item.name, phone: item.phone || '',
         positionLevel: item.positionLevel || '二级岗', position: item.positionLevel === '一级岗' ? '教务助理' : '实验助理',
-        status: 'active', isOnDuty: false, createdAt: new Date().toISOString(),
+        status: 'active', isOnShift: false, createdAt: new Date().toISOString(),
       })
       created++
     }
     return { summary: { total: items.length, created, updated: 0, skipped: 0, failed, success: created }, errors, message: `导入完成: 成功 ${created} 行，失败 ${failed} 行` }
+  }),
+
+  'POST /api/admin/sync-accounts': mockHandler(() => {
+    // 模拟：找出 accounts 表中 assistantId 非空但在 assistants 中已删除的孤立账户并清理
+    const mockAccounts = [
+      { id: 'acc-1', username: '2021001', assistantId: '1' },
+      { id: 'acc-2', username: '2021002', assistantId: '2' },
+      { id: 'acc-3', username: '2021003', assistantId: '3' },
+      { id: 'acc-4', username: '2021999', assistantId: '999' }, // 孤立：assistant 999 不存在
+      { id: 'acc-5', username: '2021888', assistantId: '888' }, // 孤立：assistant 888 不存在
+    ]
+    const existingIds = new Set(mockAssistants.map((a) => a.id))
+    const orphans = mockAccounts.filter((acc) => acc.assistantId && !existingIds.has(acc.assistantId))
+    if (orphans.length === 0) return { message: '数据已一致，无需清理', deleted: 0 }
+    return { message: `同步完成，已删除 ${orphans.length} 条孤立账户`, deleted: orphans.length, accounts: orphans }
   }),
 
   'POST /api/assistants/import-file': mockHandler(() => {

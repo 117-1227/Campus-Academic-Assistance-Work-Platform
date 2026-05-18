@@ -10,10 +10,10 @@ export default function Modal({ isOpen, onClose, title, children, footer }) {
       />
 
       {/* Panel */}
-      <div className="relative bg-white rounded-xl shadow-xl shadow-slate-900/10 w-full max-w-lg max-h-[85vh] flex flex-col">
-        {/* Header: px-6(24) py-4(16) */}
+      <div className="relative bg-white rounded-xl shadow-xl shadow-slate-900/10 w-full max-w-xl max-h-[85vh] flex flex-col">
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h3 className="text-base font-semibold text-gray-900 leading-title">{title}</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
           <button
             onClick={onClose}
             className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"

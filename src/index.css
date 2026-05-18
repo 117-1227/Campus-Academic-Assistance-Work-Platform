@@ -72,6 +72,11 @@ h1, h2, h3, h4, h5, h6 {
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 0.75rem;
+  transition: box-shadow 200ms, border-color 200ms;
+}
+.card-8pt:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  border-color: #d1d5db;
 }
 
 /* Card grid gap */

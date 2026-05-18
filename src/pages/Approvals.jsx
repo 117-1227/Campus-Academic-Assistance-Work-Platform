@@ -124,9 +124,9 @@ export default function Approvals() {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* ---- Stats Cards: grid gap-4(16), card p-6(24) ---- */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-5">
         <div className="card-8pt">
           <p className="stat-label text-gray-500">待审批</p>
           <p className="stat-number text-amber-600">{pendingList.length}</p>
@@ -141,12 +141,12 @@ export default function Approvals() {
         </div>
       </div>
 
-      {/* ---- Tabs: p-1(4), tab px-4(16) py-2(8) ---- */}
+      {/* ---- Tabs ---- */}
       <div className="flex bg-gray-100 rounded-lg p-1 w-fit">
         <button
           onClick={() => setTab('pending')}
           className={
-            'px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ' +
+            'px-5 py-2 text-[15px] font-medium rounded-md transition-all duration-150 ' +
             (tab === 'pending'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-700')
@@ -154,7 +154,7 @@ export default function Approvals() {
         >
           待审批
           {pendingList.length > 0 && (
-            <span className="ml-2 inline-flex items-center justify-center min-w-[20px] h-5 text-xs font-semibold text-white bg-amber-500 rounded-full px-1">
+            <span className="ml-2 inline-flex items-center justify-center min-w-[22px] h-5 text-xs font-semibold text-white bg-amber-500 rounded-full px-1.5">
               {pendingList.length}
             </span>
           )}
@@ -162,7 +162,7 @@ export default function Approvals() {
         <button
           onClick={() => setTab('history')}
           className={
-            'px-4 py-2 text-sm font-medium rounded-md transition-all duration-150 ' +
+            'px-5 py-2 text-[15px] font-medium rounded-md transition-all duration-150 ' +
             (tab === 'history'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-700')

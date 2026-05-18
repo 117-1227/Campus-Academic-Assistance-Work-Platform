@@ -54,17 +54,17 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
 
   return (
     <div className="flex h-screen bg-[#f3f4f6]">
-      {/* ---- Sidebar: 240px (w-60) ---- */}
-      <aside className="w-60 bg-[#0f172a] text-white flex flex-col shrink-0">
-        {/* Logo: px-6(24) py-6(24) */}
+      {/* ---- Sidebar: 256px (w-64) ---- */}
+      <aside className="w-64 bg-[#0f172a] text-white flex flex-col shrink-0">
+        {/* Logo */}
         <div className="px-6 py-6 border-b border-white/[0.08]">
-          <span className="text-base font-semibold tracking-tight text-white leading-title">
+          <span className="text-lg font-semibold tracking-tight text-white">
             校内学助工作平台
           </span>
         </div>
 
-        {/* Nav: py-4(16) px-3(12) gap-1(4) */}
-        <nav className="flex-1 py-4 px-3 space-y-1">
+        {/* Nav */}
+        <nav className="flex-1 py-5 px-3 space-y-1">
           {PAGES.map((page) => {
             const active = currentPage === page.key
             return (
@@ -72,7 +72,7 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
                 key={page.key}
                 onClick={() => setCurrentPage(page.key)}
                 className={
-                  'w-full flex items-center gap-3 px-4 py-3 text-sm rounded-lg transition-all duration-150 ' +
+                  'w-full flex items-center gap-3 px-4 py-3 text-[15px] rounded-lg transition-all duration-150 ' +
                   (active
                     ? 'bg-white/10 text-white font-medium'
                     : 'text-slate-400 hover:text-white hover:bg-white/[0.04]')
@@ -85,11 +85,11 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
           })}
         </nav>
 
-        {/* Footer: px-6(24) py-4(16) */}
-        <div className="px-6 py-4 border-t border-white/[0.08] space-y-3">
+        {/* Footer */}
+        <div className="px-6 py-5 border-t border-white/[0.08] space-y-3">
           {/* User info */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-sm font-semibold text-indigo-300 shrink-0">
+            <div className="w-9 h-9 rounded-full bg-indigo-500/20 flex items-center justify-center text-sm font-semibold text-indigo-300 shrink-0">
               {auth.user?.username?.charAt(0).toUpperCase() || 'A'}
             </div>
             <div className="min-w-0">
@@ -117,6 +117,9 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
               </p>
             )}
           </div>
+          <p className="text-xs text-slate-600/60 leading-body text-center border-t border-white/[0.06] pt-3 mt-1">
+            © 版权归青穹团队所有
+          </p>
         </div>
       </aside>
 
@@ -124,14 +127,14 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <header className="bg-white border-b border-gray-200 shrink-0">
-          <div className="max-w-[1200px] mx-auto px-6 py-4">
-            <h1 className="page-title text-gray-900">{TITLES[currentPage]}</h1>
+          <div className="max-w-[1280px] mx-auto px-8 py-5">
+            <h1 className="text-xl font-semibold text-gray-900">{TITLES[currentPage]}</h1>
           </div>
         </header>
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
-          <div className="max-w-[1200px] mx-auto px-6 py-8">
+          <div className="max-w-[1280px] mx-auto px-8 py-8">
             {renderPage()}
           </div>
         </div>
