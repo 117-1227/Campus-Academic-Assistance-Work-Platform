@@ -1,10 +1,8 @@
 // ---- Real API (USE_MOCK=false 时生效) ----
 
 async function request(path, options = {}) {
-  // Strip method prefix if present
   let url = path.replace(/^[A-Z]+ /, '')
 
-  // Replace :param segments with values from body (JSON only)
   if (options.body && typeof options.body === 'string') {
     try {
       const bodyObj = JSON.parse(options.body)
@@ -14,13 +12,11 @@ async function request(path, options = {}) {
 
   const headers = { 'Content-Type': 'application/json' }
 
-  // Attach JWT token
   try {
     const token = localStorage.getItem('token')
     if (token) headers['Authorization'] = `Bearer ${token}`
   } catch { /* localStorage unavailable */ }
 
-  // For FormData, remove Content-Type so browser sets multipart boundary
   const isFormData = options.body instanceof FormData
   if (isFormData) delete headers['Content-Type']
 
@@ -33,7 +29,6 @@ async function request(path, options = {}) {
     const detail = data.errors?.length ? ': ' + data.errors.join('; ') : ''
     throw new Error(msg + detail)
   }
-  // Unwrap backend envelope { ..., data: [...] } → return inner array
   if (Array.isArray(data)) return data
   if (data && typeof data === 'object' && Array.isArray(data.data)) {
     return data.data
@@ -41,11 +36,11 @@ async function request(path, options = {}) {
   return data
 }
 
-// ---- Mock layer (USE_MOCK=true 时生效) ----
+// ---- Mock layer ----
 
-const USE_MOCK = false // 切换为 true 以启用 Mock 数据和路由
+const USE_MOCK = false 
 
-/* ========== Mock Data ========== */
+/* ===== Mock Data ===== */
 
 let mockAssistants = [
   { id: '1', studentId: '2021001', name: '张三', positionLevel: '一级岗', position: '图书助理', status: 'active', isOnDuty: true, phone: '13800138001', createdAt: '2026-03-01T08:00:00Z' },
@@ -75,19 +70,6 @@ const mockWorkHours = {
 let nextId = 6
 function uid() { return String(nextId++) }
 
-let mockSchedules = [
-  { id: '1', assistantName: '张三', studentId: '2021001', date: '2026-05-02', shiftType: '早班', startTime: '08:00', endTime: '12:00', location: '图书馆A区' },
-  { id: '2', assistantName: '李四', studentId: '2021002', date: '2026-05-02', shiftType: '午班', startTime: '13:00', endTime: '17:00', location: '实验楼B栋' },
-  { id: '3', assistantName: '张三', studentId: '2021001', date: '2026-05-03', shiftType: '早班', startTime: '08:00', endTime: '12:00', location: '图书馆A区' },
-  { id: '4', assistantName: '赵六', studentId: '2021004', date: '2026-05-03', shiftType: '晚班', startTime: '18:00', endTime: '22:00', location: '教学楼C座' },
-  { id: '5', assistantName: '孙七', studentId: '2021005', date: '2026-05-04', shiftType: '早班', startTime: '08:00', endTime: '12:00', location: '教务大厅' },
-]
-
-let mockClockState = {
-  '2021001': { clockedIn: true, lastCheckIn: new Date(Date.now() - 3600000 * 3).toISOString(), lastCheckOut: null, todayRecords: [{ checkIn: new Date(Date.now() - 3600000 * 3).toISOString(), checkOut: null, hours: 3 }] },
-  '2021002': { clockedIn: false, lastCheckIn: null, lastCheckOut: new Date(Date.now() - 7200000).toISOString(), todayRecords: [{ checkIn: new Date(Date.now() - 3600000 * 5).toISOString(), checkOut: new Date(Date.now() - 7200000).toISOString(), hours: 3 }] },
-}
-
 function mockHandler(fn) {
   return (...args) =>
     new Promise((resolve, reject) =>
@@ -97,51 +79,39 @@ function mockHandler(fn) {
     )
 }
 
-/* ========== Mock Routes ========== */
+/* ===== Mock Routes ===== */
 
 const mockRoutes = {
-  // -- Auth --
+  // Auth
   'POST /api/admin/login': mockHandler((body) => {
     if (!body || !body.username || !body.password) {
       throw new Error('用户名和密码为必填项')
     }
-    const credentials = {
-      admin:   { role: 'admin',   id: 'mock-admin-001' },
-      teacher: { role: 'teacher', id: 'mock-teacher-001' },
-      student: { role: 'student', id: 'mock-student-001', studentId: '2021001' },
-    }
-    const cred = credentials[body.username]
-    if (cred && body.password === '123456') {
+    if (body.username === 'admin' && body.password === '123456') {
       return {
         status: 'success',
-        id: cred.id,
-        username: body.username,
-        role: cred.role,
-        studentId: cred.studentId,
-        token: `mock-jwt-token-${body.username}-2026`,
+        id: 'mock-admin-001',
+        username: 'admin',
+        role: 'admin',
+        token: 'mock-jwt-token-admin-2026',
       }
     }
     throw new Error('用户名或密码无效')
   }),
 
   'GET /api/admin/profile': mockHandler(() => ({
-    status: 'success',
-    id: 'mock-admin-001',
-    username: 'admin',
-    role: 'admin',
+    status: 'success', id: 'mock-admin-001', username: 'admin', role: 'admin',
   })),
 
-  // -- Assistants --
+  // Assistants
   'GET /api/assistants': mockHandler((query) => {
     let list = [...mockAssistants]
-    // Filters
     if (query?.search) {
       const q = query.search.toLowerCase()
       list = list.filter((a) => (a.studentId||'').toLowerCase().includes(q) || (a.name||'').toLowerCase().includes(q) || (a.phone||'').includes(q))
     }
     if (query?.status === 'active') list = list.filter((a) => a.status === 'active')
     if (query?.status === 'inactive') list = list.filter((a) => a.status === 'inactive')
-    // Pagination
     const page = parseInt(query?.page) || 1
     const limit = parseInt(query?.limit) || 10
     const total = list.length
@@ -151,20 +121,14 @@ const mockRoutes = {
   }),
 
   'POST /api/assistants': mockHandler((body) => {
-    // Check duplicate studentId
     if (mockAssistants.some((a) => a.studentId === body.studentId)) {
       throw new Error('学号已存在')
     }
     const newOne = {
-      id: uid(),
-      studentId: body.studentId,
-      name: body.name,
-      phone: body.phone || '',
-      positionLevel: body.positionLevel || '二级岗',
+      id: uid(), studentId: body.studentId, name: body.name,
+      phone: body.phone || '', positionLevel: body.positionLevel || '二级岗',
       position: body.positionLevel === '一级岗' ? '教务助理' : '实验助理',
-      status: 'active',
-      isOnDuty: false,
-      createdAt: new Date().toISOString(),
+      status: 'active', isOnDuty: false, createdAt: new Date().toISOString(),
     }
     mockAssistants.push(newOne)
     return { status: 'success', data: newOne }
@@ -218,7 +182,7 @@ const mockRoutes = {
     return { summary: { total: 2, created: 2, updated: 0, skipped: 0, failed: 0, success: 2 }, errors: [], message: '导入完成: 成功 2 行，失败 0 行' }
   }),
 
-  // -- Work Hours --
+  // Work Hours
   'GET /api/work-hours': mockHandler((query) => {
     const month = query?.month || '2026-05'
     return mockWorkHours[month] || []
@@ -231,7 +195,7 @@ const mockRoutes = {
     return found || { studentId, name: '', totalHours: 0, workDays: 0, daily: [] }
   }),
 
-  // -- Approvals --
+  // Approvals
   'GET /api/approvals': mockHandler((query) => {
     const status = query?.status || 'pending'
     if (status === 'all') return [...mockApprovals]
@@ -249,137 +213,9 @@ const mockRoutes = {
     if (item) { item.status = 'rejected'; item.rejectReason = body?.reason || '' }
     return { success: true }
   }),
-
-  // ============ Teacher Routes ============
-
-  'GET /api/teacher/assistants': mockHandler(() => [...mockAssistants]),
-
-  'GET /api/teacher/work-hours': mockHandler((query) => {
-    const month = query?.month || '2026-05'
-    return mockWorkHours[month] || []
-  }),
-
-  'GET /api/teacher/work-hours/:studentId': mockHandler((studentId, query) => {
-    const month = query?.month || '2026-05'
-    const list = mockWorkHours[month] || []
-    const found = list.find((s) => s.studentId === studentId)
-    return found || { studentId, name: '', totalHours: 0, workDays: 0, daily: [] }
-  }),
-
-  'GET /api/teacher/approvals': mockHandler((query) => {
-    const status = query?.status || 'pending'
-    if (status === 'all') return [...mockApprovals]
-    return mockApprovals.filter((a) => a.status === status)
-  }),
-
-  'POST /api/teacher/approvals/:id/approve': mockHandler((id) => {
-    const item = mockApprovals.find((a) => a.id === id)
-    if (item) item.status = 'approved'
-    return { success: true }
-  }),
-
-  'POST /api/teacher/approvals/:id/reject': mockHandler((id, body) => {
-    const item = mockApprovals.find((a) => a.id === id)
-    if (item) { item.status = 'rejected'; item.rejectReason = body?.reason || '' }
-    return { success: true }
-  }),
-
-  'GET /api/teacher/schedules': mockHandler((query) => {
-    const month = query?.month || '2026-05'
-    return mockSchedules.filter((s) => s.date.startsWith(month))
-  }),
-
-  'POST /api/teacher/schedules': mockHandler((body) => {
-    const item = { id: uid(), ...body }
-    mockSchedules.push(item)
-    return item
-  }),
-
-  'PUT /api/teacher/schedules/:id': mockHandler((id, body) => {
-    const idx = mockSchedules.findIndex((s) => s.id === id)
-    if (idx !== -1) Object.assign(mockSchedules[idx], body)
-    return mockSchedules[idx]
-  }),
-
-  'DELETE /api/teacher/schedules/:id': mockHandler((id) => {
-    mockSchedules = mockSchedules.filter((s) => s.id !== id)
-    return { success: true }
-  }),
-
-  // ============ Student Routes ============
-
-  'GET /api/student/profile': mockHandler(() => {
-    const sid = '2021001'
-    const a = mockAssistants.find((x) => x.studentId === sid)
-    return a || { studentId: sid, name: '', position: '', positionLevel: '', status: 'inactive', phone: '', createdAt: '' }
-  }),
-
-  'GET /api/student/work-hours': mockHandler((query) => {
-    const sid = '2021001'
-    const month = query?.month || '2026-05'
-    const list = mockWorkHours[month] || []
-    const found = list.find((s) => s.studentId === sid)
-    return found || { studentId: sid, name: '', totalHours: 0, workDays: 0, daily: [] }
-  }),
-
-  'GET /api/student/approvals': mockHandler(() => {
-    return mockApprovals.filter((a) => a.studentId === '2021001')
-  }),
-
-  'POST /api/student/approvals': mockHandler((body) => {
-    const item = {
-      id: uid(),
-      applicant: '张三',
-      studentId: '2021001',
-      applyDate: new Date().toISOString().slice(0, 10),
-      cardDate: body.cardDate,
-      reason: body.reason,
-      status: 'pending',
-    }
-    mockApprovals.push(item)
-    return item
-  }),
-
-  'GET /api/student/clock-status': mockHandler(() => {
-    const state = mockClockState['2021001'] || { clockedIn: false, todayRecords: [] }
-    // Update running hours
-    if (state.clockedIn && state.todayRecords.length > 0) {
-      const last = state.todayRecords[state.todayRecords.length - 1]
-      if (last && last.checkOut === null) {
-        last.hours = Math.round((Date.now() - new Date(last.checkIn).getTime()) / 3600000 * 10) / 10
-      }
-    }
-    return { ...state, date: new Date().toISOString().slice(0, 10) }
-  }),
-
-  'POST /api/student/clock-in': mockHandler(() => {
-    const now = new Date().toISOString()
-    mockClockState['2021001'] = {
-      clockedIn: true,
-      lastCheckIn: now,
-      lastCheckOut: null,
-      todayRecords: [...(mockClockState['2021001']?.todayRecords || []), { checkIn: now, checkOut: null, hours: 0 }],
-    }
-    return { success: true, checkInTime: now }
-  }),
-
-  'POST /api/student/clock-out': mockHandler(() => {
-    const now = new Date().toISOString()
-    const state = mockClockState['2021001']
-    if (state && state.clockedIn) {
-      state.clockedIn = false
-      state.lastCheckOut = now
-      const last = state.todayRecords[state.todayRecords.length - 1]
-      if (last && last.checkOut === null) {
-        last.checkOut = now
-        last.hours = Math.round((new Date(now).getTime() - new Date(last.checkIn).getTime()) / 3600000 * 10) / 10
-      }
-    }
-    return { success: true, checkOutTime: now }
-  }),
 }
 
-/* ========== Mock Router ========== */
+/* ===== Mock Router ===== */
 
 function stripQuery(str) {
   const idx = str.indexOf('?')
@@ -402,10 +238,8 @@ async function mockRequest(path, options = {}) {
   const body = options.body ? JSON.parse(options.body) : undefined
   const query = extractQuery(path)
 
-  // Exact match (strip query for key lookup)
   const plainPath = stripQuery(path)
   if (mockRoutes[plainPath]) {
-    // Extract :param values from body or the clean path, pass before body
     const routeParts = plainPath.split('/')
     const cleanPath = stripQuery(path.replace(/^[A-Z]+ /, ''))
     const pathParts = cleanPath.split('/')
@@ -417,7 +251,6 @@ async function mockRequest(path, options = {}) {
     return mockRoutes[plainPath](...args)
   }
 
-  // Pattern match with :id
   for (const [routeKey, handler] of Object.entries(mockRoutes)) {
     const spaceIdx = routeKey.indexOf(' ')
     const routeMethod = routeKey.slice(0, spaceIdx)
@@ -440,7 +273,6 @@ async function mockRequest(path, options = {}) {
       }
     }
     if (match) {
-      // Pass params, then body OR query (whichever is present)
       return handler(...params, body || query || undefined)
     }
   }

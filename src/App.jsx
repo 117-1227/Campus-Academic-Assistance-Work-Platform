@@ -1,8 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import Login from './pages/Login'
 import AdminShell from './components/AdminShell'
-import TeacherShell from './components/TeacherShell'
-import StudentShell from './components/StudentShell'
 
 function getStoredAuth() {
   try {
@@ -73,18 +71,6 @@ export default function App() {
     return <Login onLogin={handleLogin} />
   }
 
-  // ---- Role routing ----
-  const role = auth.user?.role
-  if (role === 'admin') {
-    return <AdminShell auth={auth} onLogout={handleLogout} remainMs={remainMs} formatRemain={formatRemain} expiredModal={expiredModal} />
-  }
-  if (role === 'teacher') {
-    return <TeacherShell auth={auth} onLogout={handleLogout} remainMs={remainMs} formatRemain={formatRemain} expiredModal={expiredModal} />
-  }
-  if (role === 'student') {
-    return <StudentShell auth={auth} onLogout={handleLogout} remainMs={remainMs} formatRemain={formatRemain} expiredModal={expiredModal} />
-  }
-
-  // Fallback: unknown role
-  return <Login onLogin={handleLogin} />
+  // ---- Dashboard (admin only for now) ----
+  return <AdminShell auth={auth} onLogout={handleLogout} remainMs={remainMs} formatRemain={formatRemain} expiredModal={expiredModal} />
 }
