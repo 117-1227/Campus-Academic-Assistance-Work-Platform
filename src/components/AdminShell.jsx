@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import Assistants from '../pages/Assistants'
 import WorkHours from '../pages/WorkHours'
-import Approvals from '../pages/Approvals'
 import OnlineBoard from '../pages/OnlineBoard'
 import Modal from './Modal'
+import SettingsModal from './SettingsModal'
+import DebugPanel from './DebugPanel'
 
 const PAGES = [
   {
@@ -33,33 +34,24 @@ const PAGES = [
       </svg>
     ),
   },
-  {
-    key: 'approvals',
-    label: '考勤审批',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-      </svg>
-    ),
-  },
 ]
 
 const TITLES = {
   assistants: '学助管理',
   workHours: '工时查看',
   onlineBoard: '在班看板',
-  approvals: '考勤审批',
 }
 
 export default function AdminShell({ auth, onLogout, remainMs, formatRemain, expiredModal }) {
   const [currentPage, setCurrentPage] = useState('assistants')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false)
 
   const renderPage = () => {
     switch (currentPage) {
       case 'assistants': return <Assistants />
       case 'workHours': return <WorkHours />
       case 'onlineBoard': return <OnlineBoard />
-      case 'approvals': return <Approvals />
       default: return <Assistants />
     }
   }
@@ -111,7 +103,7 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
               <p className="text-xs text-slate-400 leading-body">管理员</p>
             </div>
             <button
-              onClick={onLogout}
+              onClick={() => setLogoutConfirmOpen(true)}
               className="ml-auto p-2 text-slate-400 hover:text-white hover:bg-white/[0.06] rounded-lg transition-colors"
               title="退出登录"
             >
@@ -120,6 +112,18 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
               </svg>
             </button>
           </div>
+          {/* Settings button */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-400 hover:text-white hover:bg-white/[0.04] rounded-lg transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            系统设置
+          </button>
+
           {/* Version + session */}
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500 leading-body">v1.0</p>
@@ -151,6 +155,42 @@ export default function AdminShell({ auth, onLogout, remainMs, formatRemain, exp
           </div>
         </div>
       </main>
+
+      {/* Settings modal */}
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* Logout confirmation modal */}
+      <Modal
+        isOpen={logoutConfirmOpen}
+        onClose={() => setLogoutConfirmOpen(false)}
+        title="退出登录"
+        footer={
+          <>
+            <button onClick={() => setLogoutConfirmOpen(false)} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">取消</button>
+            <button
+              onClick={() => { setLogoutConfirmOpen(false); onLogout() }}
+              className="btn-8pt text-white bg-red-600 hover:bg-red-700"
+            >
+              确认退出
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4 text-center">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-100">
+            <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">确定要退出登录吗？</p>
+            <p className="text-xs text-gray-500 mt-1">退出后需要重新输入用户名和密码</p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Debug panel */}
+      <DebugPanel />
 
       {/* Session expired modal */}
       <Modal

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import Table from '../components/Table'
 import Modal from '../components/Modal'
@@ -14,6 +14,9 @@ export default function Assistants() {
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(INITIAL_FORM)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const timerRef = useRef(null)
   const [selected, setSelected] = useState([])
   // Stats
   const [stats, setStats] = useState({ total: 0, onShift: 0 })
@@ -21,23 +24,45 @@ export default function Assistants() {
   const [timelogModal, setTimelogModal] = useState(null)
   const [timelogs, setTimelogs] = useState([])
   const [timelogLoading, setTimelogLoading] = useState(false)
-  const [timelogForm, setTimelogForm] = useState({ date: new Date().toISOString().slice(0, 10), hours: '', notes: '' })
+  const [timelogForm, setTimelogForm] = useState({ date: new Date().toISOString().slice(0, 10), hours: '', remark: '' })
+  // Shift notice
+  const [shiftNoticeModal, setShiftNoticeModal] = useState(null)
+  const [shiftAction, setShiftAction] = useState('clock_in')
+  const [shiftNoticeSending, setShiftNoticeSending] = useState(false)
+  const [shiftNoticeResult, setShiftNoticeResult] = useState(null)
+  const [shiftNoticeStatus, setShiftNoticeStatus] = useState(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams({ limit: '100' })
-    if (search) params.set('search', search)
-    const raw = await request(`GET /api/assistants?${params.toString()}`)
-    setAssistants(Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : [])
-    setLoading(false)
+    setError('')
+    try {
+      const params = new URLSearchParams({ limit: '100' })
+      if (search) params.set('search', search)
+      const raw = await request(`GET /api/assistants?${params.toString()}`)
+      setAssistants(Array.isArray(raw?.data) ? raw.data : Array.isArray(raw) ? raw : [])
+    } catch (err) {
+      setError(err.message)
+      setAssistants([])
+    } finally {
+      setLoading(false)
+    }
   }, [search])
 
   const fetchStats = useCallback(async () => {
-    const s = await request('GET /api/assistants/stats')
-    if (s) setStats(s)
+    try {
+      const s = await request('GET /api/assistants/stats')
+      if (s) setStats(s)
+    } catch { /* non-critical */ }
   }, [])
 
   useEffect(() => { fetchData(); fetchStats() }, [fetchData, fetchStats])
+
+  // Auto-refresh
+  useEffect(() => {
+    if (!autoRefresh) return
+    timerRef.current = setInterval(() => { fetchData(); fetchStats() }, 5000)
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [autoRefresh, fetchData, fetchStats])
 
   const filtered = shiftFilter
     ? assistants.filter((a) => shiftFilter === 'true' ? a.isOnShift === true : !a.isOnShift)
@@ -62,16 +87,16 @@ export default function Assistants() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    const payload = { ...form, position: form.positionLevel }
     if (editing) {
+      const { studentId: _, ...updatePayload } = form
       await request(`PUT /api/assistants/${editing.id}`, {
         method: 'PUT',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(updatePayload),
       })
     } else {
       await request('POST /api/assistants', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(form),
       })
     }
     setModalOpen(false)
@@ -86,14 +111,47 @@ export default function Assistants() {
     await fetchStats()
   }
 
-  async function toggleOnShift(row) {
-    const newVal = !row.isOnShift
-    await request(`POST /api/assistants/${row.id}/status`, {
-      method: 'POST',
-      body: JSON.stringify({ isOnShift: newVal }),
-    })
-    await fetchData()
-    await fetchStats()
+  // --- Shift notice functions ---
+  function openShiftNoticeModal(row) {
+    setShiftNoticeModal(row)
+    setShiftAction('clock_in')
+    setShiftNoticeResult(null)
+    setShiftNoticeStatus(null)
+  }
+
+  function closeShiftNoticeModal() {
+    setShiftNoticeModal(null)
+    setShiftNoticeResult(null)
+    setShiftNoticeStatus(null)
+  }
+
+  async function sendShiftNotice() {
+    if (!shiftNoticeModal) return
+    setShiftNoticeSending(true)
+    setShiftNoticeResult(null)
+    setShiftNoticeStatus(null)
+    try {
+      const result = await request(`POST /api/admin/assistants/${shiftNoticeModal.id}/shift-notice`, {
+        method: 'POST',
+        body: JSON.stringify({ action: shiftAction }),
+      })
+      setShiftNoticeResult(result)
+      fetchData()
+    } catch (err) {
+      setShiftNoticeResult({ error: err.message })
+    } finally {
+      setShiftNoticeSending(false)
+    }
+  }
+
+  async function queryShiftNoticeStatus() {
+    if (!shiftNoticeModal) return
+    try {
+      const result = await request(`GET /api/admin/assistants/${shiftNoticeModal.id}/shift-notice`)
+      setShiftNoticeStatus(result)
+    } catch (err) {
+      setShiftNoticeStatus({ error: err.message })
+    }
   }
 
   async function resetPassword(row) {
@@ -117,7 +175,7 @@ export default function Assistants() {
   function openTimelogModal(row) {
     setTimelogModal(row)
     setTimelogs([])
-    setTimelogForm({ date: new Date().toISOString().slice(0, 10), hours: '', notes: '' })
+    setTimelogForm({ date: new Date().toISOString().slice(0, 10), hours: '', remark: '' })
     fetchTimelogs(row.id)
   }
 
@@ -128,13 +186,13 @@ export default function Assistants() {
 
   async function addTimelog(e) {
     e.preventDefault()
-    const { date, hours, notes } = timelogForm
+    const { date, hours, remark } = timelogForm
     if (!date || !hours) { alert('请填写日期和工时'); return }
     await request(`POST /api/assistants/${timelogModal.id}/timelogs`, {
       method: 'POST',
-      body: JSON.stringify({ date, hours: Number(hours), notes: notes.trim() }),
+      body: JSON.stringify({ date, hours: Number(hours), remark: remark.trim() }),
     })
-    setTimelogForm({ date: new Date().toISOString().slice(0, 10), hours: '', notes: '' })
+    setTimelogForm({ date: new Date().toISOString().slice(0, 10), hours: '', remark: '' })
     fetchTimelogs(timelogModal.id)
   }
 
@@ -182,34 +240,19 @@ export default function Assistants() {
 
       if (!mapped.length) { alert('未识别到有效数据，请检查列名'); setLoading(false); e.target.value = ''; return }
 
-      // Send as JSON to import endpoint
-      const payload = { data: mapped, mode: 'upsert' }
-      console.log('导入数据:', payload)
-
-      const token = localStorage.getItem('token')
-      const rawRes = await fetch('/api/assistants/import', {
+      const result = await request('POST /api/assistants/import', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token || ''}` },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ data: mapped, mode: 'upsert' }),
       })
-      const rawText = await rawRes.text()
-      console.log('后端原始响应:', rawRes.status, rawText.slice(0, 1000))
-
-      if (!rawRes.ok) {
-        let errMsg = `请求失败 (${rawRes.status})`
-        try {
-          const d = JSON.parse(rawText)
-          errMsg = d.message || d.error || errMsg
-          if (d.invalidRows?.length) {
-            const details = d.invalidRows.slice(0, 5).map((r) => `${r.studentId || r.rowIndex}: ${r.reason}`).join('\n')
-            errMsg += '\n' + details
-            if (d.invalidRows.length > 5) errMsg += `\n... 等 ${d.invalidRows.length} 条`
-          }
-        } catch {}
-        throw new Error(errMsg)
+      const successCount = result.summary?.success ?? mapped.length
+      const failedCount = result.summary?.failed ?? 0
+      let msg = result.message || `导入完成：${successCount} 条`
+      if (failedCount > 0) msg += `，失败 ${failedCount} 条`
+      if (result.errors?.length) {
+        const details = result.errors.slice(0, 3).map((e) => `${e.studentId || ''}: ${e.reason}`).join('；')
+        if (details) msg += '（' + details + (result.errors.length > 3 ? ` 等${result.errors.length}条` : '') + '）'
       }
-      const result = JSON.parse(rawText)
-      alert(result.message || `导入完成：${result.summary?.success || mapped.length} 条`)
+      alert(msg)
       await fetchData()
       await fetchStats()
     } catch (err) {
@@ -279,20 +322,18 @@ export default function Assistants() {
       ),
     },
     {
-      key: 'isOnShift-action',
-      title: '上/下班',
-      width: '96px',
+      key: 'shift-notice',
+      title: '打卡通知',
+      width: '112px',
       render: (_, row) => (
         <button
-          onClick={() => toggleOnShift(row)}
-          className={
-            'px-3 py-1 text-xs font-medium rounded-md transition-colors ' +
-            (row.isOnShift
-              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
-              : 'bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100')
-          }
+          onClick={() => openShiftNoticeModal(row)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 hover:shadow-sm active:scale-95"
         >
-          {row.isOnShift ? '上班' : '下班'}
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+          </svg>
+          通知打卡
         </button>
       ),
     },
@@ -354,6 +395,11 @@ export default function Assistants() {
             <option value="false">下班</option>
           </select>
           {loading && <span className="text-xs text-gray-400 ml-2">加载中...</span>}
+          {error && <span className="text-xs text-red-600 ml-2">{error}</span>}
+          <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none ml-3">
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="rounded" />
+            自动刷新（5s）
+          </label>
         </div>
 
         {/* Right: actions */}
@@ -486,8 +532,8 @@ export default function Assistants() {
             </div>
             <div className="flex-1">
               <label className="block text-xs font-medium text-gray-500 mb-1">备注</label>
-              <input value={timelogForm.notes}
-                onChange={(e) => setTimelogForm((p) => ({ ...p, notes: e.target.value }))}
+              <input value={timelogForm.remark}
+                onChange={(e) => setTimelogForm((p) => ({ ...p, remark: e.target.value }))}
                 placeholder="可选备注"
                 className="w-full h-9 px-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
               />
@@ -526,6 +572,71 @@ export default function Assistants() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      </Modal>
+
+      {/* Shift Notice Modal */}
+      <Modal
+        isOpen={!!shiftNoticeModal}
+        onClose={closeShiftNoticeModal}
+        title={shiftNoticeModal ? `打卡通知 — ${shiftNoticeModal.name} (${shiftNoticeModal.studentId})` : '打卡通知'}
+        footer={
+          <>
+            <button onClick={closeShiftNoticeModal} className="btn-8pt text-gray-700 bg-white border border-gray-300 hover:bg-gray-50">关闭</button>
+            {shiftNoticeResult && !shiftNoticeResult.error && (
+              <button onClick={queryShiftNoticeStatus} className="btn-8pt text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100">查询响应状态</button>
+            )}
+            <button onClick={sendShiftNotice} disabled={shiftNoticeSending} className="btn-8pt text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+              {shiftNoticeSending ? '发送中...' : '发送通知'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          {/* Student info + action selector */}
+          <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+            <span className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold shrink-0">
+              {shiftNoticeModal?.name?.charAt(0) || '?'}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{shiftNoticeModal?.name}</p>
+              <p className="text-xs text-gray-500">{shiftNoticeModal?.studentId} · {shiftNoticeModal?.position || shiftNoticeModal?.positionLevel || '—'}</p>
+            </div>
+            <select value={shiftAction} onChange={(e) => setShiftAction(e.target.value)}
+              className="h-9 px-3 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white">
+              <option value="clock_in">上班打卡</option>
+              <option value="clock_out">下班打卡</option>
+            </select>
+          </div>
+
+          {/* Send result */}
+          {shiftNoticeResult && (
+            <div className={`p-4 rounded-lg border ${shiftNoticeResult.error ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+              {shiftNoticeResult.error ? (
+                <p className="text-sm text-red-700">{shiftNoticeResult.error}</p>
+              ) : (
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-emerald-700">通知已发送</p>
+                  {shiftNoticeResult.message && <p className="text-xs text-emerald-600">{shiftNoticeResult.message}</p>}
+                  <pre className="text-xs text-gray-500 mt-2 whitespace-pre-wrap">{JSON.stringify(shiftNoticeResult, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Query status result */}
+          {shiftNoticeStatus && (
+            <div className={`p-4 rounded-lg border ${shiftNoticeStatus.error ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+              <p className="text-xs font-medium text-gray-600 mb-1">通知状态：</p>
+              <pre className="text-xs text-gray-700 whitespace-pre-wrap">{JSON.stringify(shiftNoticeStatus, null, 2)}</pre>
+            </div>
+          )}
+
+          {!shiftNoticeResult && !shiftNoticeStatus && (
+            <p className="text-sm text-gray-400 text-center py-4">
+              选择打卡类型后点击"发送通知"，学助客户端将收到弹窗提醒
+            </p>
           )}
         </div>
       </Modal>

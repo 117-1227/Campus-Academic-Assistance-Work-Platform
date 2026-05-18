@@ -5,6 +5,22 @@ import { request } from '../utils/api'
 const SHIFT_LABEL = { morning: '上午班', afternoon: '下午班', evening: '晚班', other: '其他' }
 const STATUS_LABEL = { open: '进行中', pending_confirm: '待确认', closed: '已下班', auto_closed: '系统收口', corrected: '已纠正' }
 
+const STATUS_STYLE = {
+  open:           'bg-emerald-50 text-emerald-700 border-emerald-200',
+  pending_confirm:'bg-amber-50 text-amber-700 border-amber-200',
+  closed:         'bg-gray-50 text-gray-500 border-gray-200',
+  auto_closed:    'bg-orange-50 text-orange-700 border-orange-200',
+  corrected:      'bg-blue-50 text-blue-700 border-blue-200',
+}
+
+const STATUS_DOT = {
+  open:           'bg-emerald-500 animate-pulse',
+  pending_confirm:'bg-amber-500 animate-pulse',
+  closed:         'bg-gray-400',
+  auto_closed:    'bg-orange-400',
+  corrected:      'bg-blue-400',
+}
+
 function formatMinutes(m) {
   if (m == null) return '—'
   const h = Math.floor(m / 60)
@@ -16,17 +32,22 @@ export default function OnlineBoard() {
   const [sessions, setSessions] = useState([])
   const [serverTime, setServerTime] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const timerRef = useRef(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
+    setError('')
     try {
       const result = await request('GET /api/admin/attendance/online')
-      setSessions(Array.isArray(result.data) ? result.data : [])
+      setSessions(Array.isArray(result?.data) ? result.data : [])
       if (result.serverTime) setServerTime(result.serverTime)
-    } catch { /* handled by request */ }
-    setLoading(false)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -91,15 +112,13 @@ export default function OnlineBoard() {
     {
       key: 'status',
       title: '状态',
-      width: '96px',
+      width: '100px',
       render: (v) => {
-        const isOpen = v === 'open'
+        const style = STATUS_STYLE[v] || STATUS_STYLE.closed
+        const dot  = STATUS_DOT[v]  || STATUS_DOT.closed
         return (
-          <span className={
-            'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border ' +
-            (isOpen ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200')
-          }>
-            <span className={'w-1.5 h-1.5 rounded-full ' + (isOpen ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500')} />
+          <span className={'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ' + style}>
+            <span className={'w-1.5 h-1.5 rounded-full ' + dot} />
             {STATUS_LABEL[v] || v}
           </span>
         )
@@ -139,6 +158,7 @@ export default function OnlineBoard() {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 flex-1">
           {loading && <span className="text-xs text-gray-400">刷新中...</span>}
+          {error && <span className="text-xs text-red-600 ml-2">{error}</span>}
           <span className="text-xs text-gray-400">服务器时间 {serverTimeStr}</span>
         </div>
         <div className="flex items-center gap-2">

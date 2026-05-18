@@ -1,4 +1,4 @@
-export default function Modal({ isOpen, onClose, title, children, footer }) {
+export default function Modal({ isOpen, onClose, title, children, footer, wide }) {
   if (!isOpen) return null
 
   return (
@@ -10,7 +10,7 @@ export default function Modal({ isOpen, onClose, title, children, footer }) {
       />
 
       {/* Panel */}
-      <div className="relative bg-white rounded-xl shadow-xl shadow-slate-900/10 w-full max-w-xl max-h-[85vh] flex flex-col">
+      <div className={`relative bg-white rounded-xl shadow-xl shadow-slate-900/10 w-full ${wide ? 'max-w-2xl' : 'max-w-xl'} max-h-[85vh] flex flex-col`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h3 className="text-lg font-semibold text-gray-900">{title}</h3>

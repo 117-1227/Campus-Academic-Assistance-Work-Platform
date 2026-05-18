@@ -11,15 +11,25 @@ export default function Approvals() {
   const [rejectModal, setRejectModal] = useState({ open: false, item: null })
   const [rejectReason, setRejectReason] = useState('')
 
+  const [error, setError] = useState('')
+
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const [pending, history] = await Promise.all([
-      request('GET /api/approvals?status=pending'),
-      request('GET /api/approvals?status=all'),
-    ])
-    setPendingList(pending)
-    setHistoryList(history.filter((a) => a.status !== 'pending'))
-    setLoading(false)
+    setError('')
+    try {
+      const [pending, history] = await Promise.all([
+        request('GET /api/approvals?status=pending'),
+        request('GET /api/approvals?status=all'),
+      ])
+      setPendingList(Array.isArray(pending) ? pending : [])
+      setHistoryList(Array.isArray(history) ? history.filter((a) => a.status !== 'pending') : [])
+    } catch (err) {
+      setError(err.message)
+      setPendingList([])
+      setHistoryList([])
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -172,6 +182,7 @@ export default function Approvals() {
       </div>
 
       {loading && <p className="text-xs text-gray-400">加载中...</p>}
+      {error && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
 
       {/* ---- Table ---- */}
       {tab === 'pending' ? (

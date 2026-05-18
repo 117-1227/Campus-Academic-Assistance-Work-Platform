@@ -33,17 +33,25 @@ export default function WorkHours() {
   const [expandedRow, setExpandedRow] = useState(null)
   const [dailyDetail, setDailyDetail] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const fetchData = useCallback(async () => {
     if (!month) return
     setLoading(true)
-    const { from, to } = monthToRange(month)
-    const result = await request(`GET /api/admin/attendance/report?from=${from}&to=${to}&limit=200`)
-    const list = Array.isArray(result.data) ? result.data : Array.isArray(result) ? result : []
-    setData(list)
-    setExpandedRow(null)
-    setDailyDetail(null)
-    setLoading(false)
+    setError('')
+    try {
+      const { from, to } = monthToRange(month)
+      const result = await request(`GET /api/admin/attendance/report?from=${from}&to=${to}&limit=200`)
+      const list = Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : []
+      setData(list)
+      setExpandedRow(null)
+      setDailyDetail(null)
+    } catch (err) {
+      setError(err.message)
+      setData([])
+    } finally {
+      setLoading(false)
+    }
   }, [month])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -124,6 +132,7 @@ export default function WorkHours() {
           />
         </div>
         {loading && <span className="text-xs text-gray-400">加载中...</span>}
+        {error && <span className="text-xs text-red-600 ml-3">{error}</span>}
       </div>
 
       {/* Table */}

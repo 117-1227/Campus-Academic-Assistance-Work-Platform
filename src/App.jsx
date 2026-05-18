@@ -1,6 +1,10 @@
 import { useState, useCallback, useEffect } from 'react'
 import Login from './pages/Login'
 import AdminShell from './components/AdminShell'
+import { setOnUnauthorized } from './utils/api'
+import logger from './utils/logger'
+
+const log = logger('App')
 
 function getStoredAuth() {
   try {
@@ -38,28 +42,42 @@ export default function App() {
   const [remainMs, setRemainMs] = useState(0)
 
   const handleLogin = useCallback((token, user) => {
+    log.info('登录成功', { username: user.username, role: user.role })
     localStorage.setItem('token', token)
     localStorage.setItem('user', JSON.stringify(user))
     setAuth({ token, user })
   }, [])
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(({ skipApi } = {}) => {
+    log.info('退出登录')
+    const token = localStorage.getItem('token')
+    // 通知服务端撤销 session（401 触发的登出跳过，token 本身已失效）
+    if (!skipApi && token) {
+      navigator.sendBeacon?.('/api/admin/logout', JSON.stringify({}))
+        || fetch('/api/admin/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }).catch(() => {})
+    }
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     setAuth(null)
     setExpiredModal(false)
   }, [])
 
+  // Wire 401 interception
+  useEffect(() => { setOnUnauthorized(() => handleLogout({ skipApi: true })) }, [handleLogout])
+
   // Check token expiry periodically
   useEffect(() => {
     if (!auth?.token) return
     function check() {
       const exp = getTokenExp(auth.token)
-      if (!exp) return
+      if (!exp) { log.warn('无法解析 Token 过期时间') }
       const now = Date.now()
-      const remain = exp - now
+      const remain = exp ? exp - now : 0
       setRemainMs(remain > 0 ? remain : 0)
-      if (now >= exp) setExpiredModal(true)
+      if (exp && now >= exp) {
+        log.warn('Token 已过期', { expiredAt: new Date(exp).toLocaleString('zh-CN') })
+        setExpiredModal(true)
+      }
     }
     check()
     const timer = setInterval(check, 30000)
