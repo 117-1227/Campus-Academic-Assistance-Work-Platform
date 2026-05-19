@@ -48,14 +48,8 @@ export default function App() {
     setAuth({ token, user })
   }, [])
 
-  const handleLogout = useCallback(({ skipApi } = {}) => {
+  const handleLogout = useCallback(() => {
     log.info('退出登录')
-    const token = localStorage.getItem('token')
-    // 通知服务端撤销 session（401 触发的登出跳过，token 本身已失效）
-    if (!skipApi && token) {
-      navigator.sendBeacon?.('/api/admin/logout', JSON.stringify({}))
-        || fetch('/api/admin/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } }).catch(() => {})
-    }
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     setAuth(null)
@@ -63,7 +57,7 @@ export default function App() {
   }, [])
 
   // Wire 401 interception
-  useEffect(() => { setOnUnauthorized(() => handleLogout({ skipApi: true })) }, [handleLogout])
+  useEffect(() => { setOnUnauthorized(() => handleLogout()) }, [handleLogout])
 
   // Check token expiry periodically
   useEffect(() => {
